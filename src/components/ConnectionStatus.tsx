@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Wifi, WifiOff } from 'lucide-react';
 
 interface ConnectionStatusProps {
@@ -16,6 +16,30 @@ export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
   onConnect,
   onRetry
 }) => {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Show offline status if not online
+  if (!isOnline) {
+    return (
+      <div className="flex items-center space-x-2 text-sm">
+        <WifiOff className="w-4 h-4 text-red-400" />
+        <span className="text-red-400">Offline</span>
+      </div>
+    );
+  }
   if (isConnecting) {
     return (
       <div className="flex items-center space-x-2 text-sm">

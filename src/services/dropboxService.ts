@@ -169,6 +169,11 @@ class DropboxService {
         const retryAfter = error.headers?.['retry-after'] ? parseInt(error.headers['retry-after']) * 1000 : 2000;
         await new Promise(resolve => setTimeout(resolve, retryAfter));
         return this.retryRequest(requestFn, retries - 1);
+      } else if (error.status === 401) {
+        // Authentication failed - clear token and throw specific error
+        console.error('Authentication failed (401) - token may be expired or invalid');
+        this.disconnect();
+        throw new Error('Authentication failed. Please reconnect to Dropbox.');
       }
       throw error;
     }
@@ -178,9 +183,30 @@ class DropboxService {
     return !!this.accessToken && !!this.dbx;
   }
 
+  async validateToken(): Promise<boolean> {
+    if (!this.dbx || !this.accessToken) {
+      return false;
+    }
+
+    try {
+      // Test the token by making a simple API call
+      await this.dbx.usersGetCurrentAccount();
+      return true;
+    } catch (error: any) {
+      if (error.status === 401) {
+        console.warn('Token validation failed - token is invalid or expired');
+        this.disconnect();
+        return false;
+      }
+      // Other errors might be network issues, so don't disconnect
+      console.warn('Token validation failed with non-auth error:', error);
+      return false;
+    }
+  }
+
   async listFolders(path: string = ''): Promise<Folder[]> {
     if (!this.dbx) {
-      throw new Error('Not authenticated');
+      throw new Error('Not connected to Dropbox. Please reconnect.');
     }
 
     const cacheKey = this.getCacheKey('listFolders', { path });
@@ -223,9 +249,18 @@ class DropboxService {
       this.setCache(cacheKey, folders, 10);
       
       return folders;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to list folders:', error);
-      throw error;
+      if (error.status === 401) {
+        throw new Error('Authentication failed. Please reconnect to Dropbox.');
+      } else if (error.status === 429) {
+        throw new Error('Too many requests. Please wait a moment and try again.');
+      } else if (error.status >= 500) {
+        throw new Error('Dropbox service is temporarily unavailable. Please try again later.');
+      } else if (!navigator.onLine) {
+        throw new Error('No internet connection. Please check your network and try again.');
+      }
+      throw new Error('Failed to load folders. Please try again.');
     }
   }
 
