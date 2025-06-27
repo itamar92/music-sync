@@ -8,6 +8,7 @@ import {
   Home
 } from 'lucide-react';
 import { Folder } from '../types';
+import { localDataService } from '../services/localDataService';
 
 interface FolderBrowserProps {
   folders: Folder[];
@@ -195,7 +196,7 @@ export const FolderBrowser: React.FC<FolderBrowserProps> = ({
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-medium text-white truncate">{folder.name}</h3>
+                    <h3 className="font-medium text-white truncate">{localDataService.getFolderDisplayName(folder)}</h3>
                     <div className="flex items-center space-x-2 text-sm text-gray-400">
                       {loadingDetails.has(folder.id) ? (
                         <span>Loading...</span>

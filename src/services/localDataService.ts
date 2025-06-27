@@ -1,4 +1,4 @@
-import { Track, Playlist } from '../types';
+import { Track, Playlist, Folder } from '../types';
 
 interface TrackAlias {
   trackId: string;
@@ -120,6 +120,12 @@ class LocalDataService {
 
   getPlaylistDisplayName(playlist: Playlist): string {
     return playlist.displayName || playlist.name;
+  }
+
+  getFolderDisplayName(folder: Folder): string {
+    const aliases = this.getPlaylistAliases();
+    const alias = aliases.get(folder.id);
+    return alias?.displayName || folder.name;
   }
 
   // Clear all data (for logout/reset)

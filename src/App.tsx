@@ -45,6 +45,8 @@ function App() {
     navigateManagementBack,
     toggleFolderSync,
     getTracksFromFolder,
+    retry,
+    updateFolderDisplayName,
     clearError
   } = useDropbox();
 
@@ -206,6 +208,8 @@ function App() {
       localDataService.savePlaylistAlias(selectedFolder.id, newName);
       // Update the selected folder to reflect the change
       setSelectedFolder(prev => prev ? { ...prev, displayName: newName } : null);
+      // Update the folders list to reflect the change in the main view
+      updateFolderDisplayName(selectedFolder.id, newName);
     }
   };
 
@@ -414,7 +418,7 @@ function App() {
               isConnecting={isConnecting}
               error={dropboxError}
               onConnect={connect}
-              onRetry={clearError}
+              onRetry={retry}
             />
           </div>
         </div>

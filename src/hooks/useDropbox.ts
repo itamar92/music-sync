@@ -13,53 +13,6 @@ export const useDropbox = () => {
   const [managementFolders, setManagementFolders] = useState<Folder[]>([]);
   const [managementPath, setManagementPath] = useState<string>('');
 
-  const checkConnection = useCallback(async () => {
-    try {
-      setIsConnecting(true);
-      const connected = dropboxService.isAuthenticated();
-      
-      if (connected) {
-        setIsConnected(true);
-        await loadFolders();
-      } else {
-        setIsConnected(false);
-      }
-    } catch (err) {
-      console.error('Connection check failed:', err);
-      setError(err instanceof Error ? err.message : 'Connection failed');
-      setIsConnected(false);
-    } finally {
-      setIsConnecting(false);
-    }
-  }, []);
-
-  const connect = useCallback(async () => {
-    try {
-      setError(null);
-      await dropboxService.authenticate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed');
-    }
-  }, []);
-
-  const handleAuthCallback = useCallback(async (code: string) => {
-    try {
-      setIsConnecting(true);
-      const success = await dropboxService.handleAuthCallback(code);
-      
-      if (success) {
-        setIsConnected(true);
-        await loadFolders();
-      } else {
-        setError('Authentication failed');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed');
-    } finally {
-      setIsConnecting(false);
-    }
-  }, []);
-
   // Helper function to load all synced folders (including nested ones)
   const loadAllSyncedFolders = useCallback(async (syncedIds: string[]) => {
     const syncedFolders: Folder[] = [];
@@ -111,6 +64,60 @@ export const useDropbox = () => {
       setError(err instanceof Error ? err.message : 'Failed to load folders');
     }
   }, [loadAllSyncedFolders]);
+
+  const checkConnection = useCallback(async () => {
+    try {
+      setIsConnecting(true);
+      const connected = dropboxService.isAuthenticated();
+      
+      if (connected) {
+        // Validate the token before considering it connected
+        const isValid = await dropboxService.validateToken();
+        if (isValid) {
+          setIsConnected(true);
+          await loadFolders();
+        } else {
+          setIsConnected(false);
+          setError('Your Dropbox session has expired. Please reconnect.');
+        }
+      } else {
+        setIsConnected(false);
+      }
+    } catch (err) {
+      console.error('Connection check failed:', err);
+      setError(err instanceof Error ? err.message : 'Connection failed');
+      setIsConnected(false);
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [loadFolders]);
+
+  const connect = useCallback(async () => {
+    try {
+      setError(null);
+      await dropboxService.authenticate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Authentication failed');
+    }
+  }, []);
+
+  const handleAuthCallback = useCallback(async (code: string) => {
+    try {
+      setIsConnecting(true);
+      const success = await dropboxService.handleAuthCallback(code);
+      
+      if (success) {
+        setIsConnected(true);
+        await loadFolders();
+      } else {
+        setError('Authentication failed');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Authentication failed');
+    } finally {
+      setIsConnecting(false);
+    }
+  }, []);
 
   const refreshFolders = useCallback(async () => {
     if (isConnected) {
@@ -225,6 +232,59 @@ export const useDropbox = () => {
     localStorage.removeItem('synced_folders');
   }, []);
 
+  const updateFolderDisplayName = useCallback((folderId: string, displayName: string) => {
+    // Update the folders list to reflect the change in the main view
+    setFolders(prevFolders => 
+      prevFolders.map(folder => 
+        folder.id === folderId 
+          ? { ...folder, displayName }
+          : folder
+      )
+    );
+    
+    // Also update allFolders if the folder exists there
+    setAllFolders(prevAll => 
+      prevAll.map(folder => 
+        folder.id === folderId 
+          ? { ...folder, displayName }
+          : folder
+      )
+    );
+  }, []);
+
+  const retry = useCallback(async () => {
+    try {
+      setError(null);
+      setIsConnecting(true);
+      
+      // Check if we have a token first
+      const token = localStorage.getItem('dropbox_access_token');
+      if (token) {
+        // Try to validate existing token
+        dropboxService.setAccessToken(token);
+        const isValid = await dropboxService.validateToken();
+        if (isValid) {
+          setIsConnected(true);
+          await loadFolders();
+          setIsConnecting(false);
+        } else {
+          // Token is invalid, start fresh authentication
+          console.log('Existing token is invalid, starting fresh authentication...');
+          await connect();
+        }
+      } else {
+        // No token, start fresh authentication
+        console.log('No token found, starting fresh authentication...');
+        await connect();
+      }
+    } catch (err) {
+      console.error('Retry failed:', err);
+      setError(err instanceof Error ? err.message : 'Retry failed');
+      setIsConnected(false);
+      setIsConnecting(false);
+    }
+  }, [connect, loadFolders]);
+
   // Handle auth callback from URL and initial connection check
   useEffect(() => {
     // Check for authorization code (standard flow)
@@ -278,6 +338,8 @@ export const useDropbox = () => {
     getTracksFromFolder,
     searchTracks,
     disconnect,
+    retry,
+    updateFolderDisplayName,
     clearError: () => setError(null)
   };
 };
