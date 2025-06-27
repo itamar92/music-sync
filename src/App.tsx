@@ -99,10 +99,21 @@ function App() {
   useEffect(() => {
     const handleDurationUpdates = (event: CustomEvent) => {
       const { tracks, folderPath } = event.detail;
+      console.log('Duration update event received:', { 
+        folderPath, 
+        selectedFolderPath: selectedFolder?.path,
+        tracksCount: tracks.length,
+        sampleDurations: tracks.slice(0, 3).map(t => ({ name: t.name, duration: t.duration }))
+      });
+      
       if (selectedFolder && selectedFolder.path === folderPath) {
+        console.log('Updating playlist with new durations');
         // Update the current playlist with new durations
         const tracksWithAliases = localDataService.applyTrackAliases(tracks);
         setPlaylist(tracksWithAliases);
+        console.log('Playlist updated, new durations:', tracksWithAliases.slice(0, 3).map(t => ({ name: t.name, duration: t.duration })));
+      } else {
+        console.log('Path mismatch - selectedFolder.path:', selectedFolder?.path, 'folderPath:', folderPath);
       }
     };
 
@@ -318,7 +329,7 @@ function App() {
             
             <div className="flex-1 pt-4">
               <EditableText
-                text={localDataService.getPlaylistDisplayName(selectedFolder)}
+                text={localDataService.getFolderDisplayName(selectedFolder)}
                 onSave={handlePlaylistNameChange}
                 className="text-4xl font-bold mb-2 block"
                 placeholder="Playlist name..."

@@ -438,7 +438,9 @@ class DropboxService {
       this.setCache(cacheKey, tracks, 20);
       
       // Load durations asynchronously in background
-      this.loadTrackDurationsAsync(tracks, cacheKey);
+      this.loadTrackDurationsAsync(tracks, cacheKey).catch(error => {
+        console.error('Duration loading failed:', error);
+      });
       
       return tracks;
     } catch (error) {
@@ -448,6 +450,7 @@ class DropboxService {
   }
 
   private async loadTrackDurationsAsync(tracks: Track[], cacheKey: string): Promise<void> {
+    console.log('loadTrackDurationsAsync called with', tracks.length, 'tracks');
     try {
       // Load durations in parallel, but limit concurrency to avoid overwhelming the API
       const BATCH_SIZE = 3;
@@ -457,7 +460,9 @@ class DropboxService {
         
         await Promise.all(batch.map(async (track) => {
           try {
+            console.log(`Getting duration for ${track.name}...`);
             const durationSeconds = await this.getAudioDuration(track.path!);
+            console.log(`Got duration for ${track.name}: ${durationSeconds}s`);
             track.duration = this.formatDuration(durationSeconds);
             track.durationSeconds = durationSeconds;
           } catch (error) {
@@ -476,6 +481,11 @@ class DropboxService {
       this.setCache(cacheKey, tracks, 20);
       
       // Emit custom event to notify UI about duration updates
+      console.log('Emitting trackDurationsUpdated event:', { 
+        folderPath: tracks[0]?.folderId, 
+        tracksCount: tracks.length,
+        sampleDurations: tracks.slice(0, 3).map(t => ({ name: t.name, duration: t.duration }))
+      });
       window.dispatchEvent(new CustomEvent('trackDurationsUpdated', { 
         detail: { tracks, folderPath: tracks[0]?.folderId } 
       }));
@@ -486,21 +496,26 @@ class DropboxService {
   }
 
   private async getAudioDuration(filePath: string): Promise<number> {
+    console.log(`getAudioDuration called for: ${filePath}`);
     try {
       // Check cache first for duration
       const durationCacheKey = this.getCacheKey('duration', { filePath });
       const cachedDuration = this.getFromCache<number>(durationCacheKey);
       if (cachedDuration !== null) {
+        console.log(`Using cached duration for ${filePath}: ${cachedDuration}s`);
         return cachedDuration;
       }
 
       // Get a temporary link to the file
+      console.log(`Getting stream URL for: ${filePath}`);
       const streamUrl = await this.getFileStreamUrl(filePath);
+      console.log(`Got stream URL: ${streamUrl.substring(0, 50)}...`);
       
       // Create audio element to get metadata
       const duration = await new Promise<number>((resolve) => {
         const audio = new Audio();
-        audio.crossOrigin = 'anonymous';
+        // Remove crossOrigin as it might cause CORS issues with Dropbox
+        // audio.crossOrigin = 'anonymous';
         audio.preload = 'metadata';
         
         let resolved = false;
@@ -510,41 +525,42 @@ class DropboxService {
             resolved = true;
             audio.removeEventListener('loadedmetadata', onLoadedMetadata);
             audio.removeEventListener('error', onError);
-            audio.removeEventListener('canplaythrough', onCanPlay);
             audio.src = '';
           }
         };
         
         const onLoadedMetadata = () => {
-          cleanup();
-          resolve(audio.duration && !isNaN(audio.duration) ? audio.duration : 0);
-        };
-        
-        const onError = () => {
-          cleanup();
-          console.warn(`Failed to load metadata for ${filePath}`);
-          resolve(0);
-        };
-        
-        const onCanPlay = () => {
-          if (audio.duration && !isNaN(audio.duration)) {
+          if (!resolved) {
+            console.log(`loadedmetadata event for ${filePath}, duration: ${audio.duration}`);
+            resolved = true;
             cleanup();
-            resolve(audio.duration);
+            resolve(audio.duration && !isNaN(audio.duration) ? audio.duration : 0);
+          }
+        };
+        
+        const onError = (error: any) => {
+          if (!resolved) {
+            console.warn(`Audio error for ${filePath}:`, error, audio.error);
+            resolved = true;
+            cleanup();
+            resolve(0);
           }
         };
         
         audio.addEventListener('loadedmetadata', onLoadedMetadata);
         audio.addEventListener('error', onError);
-        audio.addEventListener('canplaythrough', onCanPlay);
         
-        // Set a shorter timeout to avoid hanging
+        // Set timeout to avoid hanging
         setTimeout(() => {
           if (!resolved) {
+            console.warn(`Timeout loading audio metadata for ${filePath}`);
+            resolved = true;
             cleanup();
             resolve(0);
           }
-        }, 3000);
+        }, 10000);
         
+        console.log(`Setting audio src for ${filePath}`);
         audio.src = streamUrl;
       });
 
