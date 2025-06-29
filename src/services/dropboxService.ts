@@ -1,5 +1,5 @@
-import { Dropbox, DropboxAuth } from 'dropbox';
-import { Track, Folder, DropboxFile } from '../types';
+import { Dropbox, DropboxAuth, files } from 'dropbox';
+import { Track, Folder } from '../types';
 
 class DropboxService {
   private dbx: Dropbox | null = null;
@@ -44,16 +44,21 @@ class DropboxService {
     }
   }
 
-  async authenticate(): Promise<boolean> {
+  async authenticate(redirect: boolean = true): Promise<string | boolean> {
     if (!this.dbxAuth) {
       throw new Error('Dropbox auth not initialized');
     }
 
     try {
-      const authUrl = await this.dbxAuth.getAuthenticationUrl('http://localhost:3000');
-      console.log('Redirecting to Dropbox auth URL:', authUrl);
-      window.location.href = authUrl;
-      return true;
+      const redirectUri = window.location.origin;
+      const authUrl = await this.dbxAuth.getAuthenticationUrl(redirectUri);
+      
+      if (redirect) {
+        window.location.href = authUrl as string;
+        return true;
+      } else {
+        return authUrl as string;
+      }
     } catch (error) {
       console.error('Authentication failed:', error);
       return false;
@@ -67,7 +72,8 @@ class DropboxService {
 
     try {
       console.log('Handling auth callback with code:', code);
-      await this.dbxAuth.getAccessTokenFromCode('http://localhost:3000', code);
+      const redirectUri = window.location.origin;
+      await this.dbxAuth.getAccessTokenFromCode(redirectUri, code);
       const token = this.dbxAuth.getAccessToken();
       
       if (token) {
@@ -232,17 +238,19 @@ class DropboxService {
       const folderEntries = response.result.entries.filter(entry => entry['.tag'] === 'folder');
 
       for (const entry of folderEntries) {
-        folders.push({
-          id: entry.path_lower,
-          name: entry.name,
-          path: entry.path_lower,
-          trackCount: 0, // Will be loaded when needed
-          synced: false,
-          type: 'dropbox',
-          isFolder: true,
-          parentPath: path || '',
-          hasSubfolders: true // Assume true for faster loading, will be verified when clicked
-        });
+        if(entry.path_lower) {
+          folders.push({
+            id: entry.path_lower,
+            name: entry.name,
+            path: entry.path_lower,
+            trackCount: 0, // Will be loaded when needed
+            synced: false,
+            type: 'dropbox',
+            isFolder: true,
+            parentPath: path || '',
+            hasSubfolders: true // Assume true for faster loading, will be verified when clicked
+          });
+        }
       }
 
       // Cache the results for 10 minutes
@@ -280,6 +288,9 @@ class DropboxService {
       
       // Process folders in parallel for better performance
       const folderPromises = folderEntries.map(async (entry) => {
+        if(!entry.path_lower) {
+          return null;
+        }
         const [trackCount, hasSubfolders] = await Promise.all([
           this.getAudioFileCount(entry.path_lower),
           this.hasSubfolders(entry.path_lower)
@@ -298,7 +309,7 @@ class DropboxService {
         };
       });
 
-      const resolvedFolders = await Promise.all(folderPromises);
+      const resolvedFolders = (await Promise.all(folderPromises)).filter(f => f !== null);
       folders.push(...resolvedFolders);
 
       return folders;
@@ -418,6 +429,7 @@ class DropboxService {
       // First, create tracks without duration for immediate display
       for (const entry of response.result.entries) {
         if (entry['.tag'] === 'file' && 
+            entry.path_lower &&
             audioExtensions.some(ext => entry.name.toLowerCase().endsWith(ext))) {
           
           const track: Track = {
@@ -461,10 +473,12 @@ class DropboxService {
         await Promise.all(batch.map(async (track) => {
           try {
             console.log(`Getting duration for ${track.name}...`);
-            const durationSeconds = await this.getAudioDuration(track.path!);
-            console.log(`Got duration for ${track.name}: ${durationSeconds}s`);
-            track.duration = this.formatDuration(durationSeconds);
-            track.durationSeconds = durationSeconds;
+            if(track.path) {
+              const durationSeconds = await this.getAudioDuration(track.path);
+              console.log(`Got duration for ${track.name}: ${durationSeconds}s`);
+              track.duration = this.formatDuration(durationSeconds);
+              track.durationSeconds = durationSeconds;
+            }
           } catch (error) {
             console.warn(`Failed to load duration for ${track.name}:`, error);
             // Keep default 0:00 duration on error
@@ -611,7 +625,7 @@ class DropboxService {
         path: filePath
       });
 
-      return response.result.fileBinary as unknown as Blob;
+      return (response.result as any).fileBinary as Blob;
     } catch (error) {
       console.error('Failed to download file:', error);
       throw error;
@@ -642,16 +656,18 @@ class DropboxService {
         if (match.metadata['.tag'] === 'metadata' && 
             match.metadata.metadata['.tag'] === 'file') {
           
-          const file = match.metadata.metadata;
-          
-          tracks.push({
-            id: file.path_lower,
-            name: this.getFileNameWithoutExtension(file.name),
-            artist: 'Unknown Artist',
-            duration: '0:00',
-            durationSeconds: 0,
-            path: file.path_lower
-          });
+          const file = match.metadata.metadata as files.FileMetadataReference;
+
+          if(file.path_lower) {
+            tracks.push({
+              id: file.path_lower,
+              name: this.getFileNameWithoutExtension(file.name),
+              artist: 'Unknown Artist',
+              duration: '0:00',
+              durationSeconds: 0,
+              path: file.path_lower
+            });
+          }
         }
       }
 
@@ -695,18 +711,20 @@ class DropboxService {
       );
 
       if (response.result['.tag'] === 'folder') {
-        const folder = response.result;
-        return {
-          id: folder.path_lower,
-          name: folder.name,
-          path: folder.path_lower,
-          trackCount: 0,
-          synced: false,
-          type: 'dropbox',
-          isFolder: true,
-          parentPath: folder.path_lower.split('/').slice(0, -1).join('/'),
-          hasSubfolders: true
-        };
+        const folder = response.result as files.FolderMetadataReference;
+        if(folder.path_lower) {
+          return {
+            id: folder.path_lower,
+            name: folder.name,
+            path: folder.path_lower,
+            trackCount: 0,
+            synced: false,
+            type: 'dropbox',
+            isFolder: true,
+            parentPath: folder.path_lower.split('/').slice(0, -1).join('/'),
+            hasSubfolders: true
+          };
+        }
       }
       return null;
     } catch (error) {
