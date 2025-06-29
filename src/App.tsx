@@ -74,6 +74,7 @@ function App() {
   const [isLoadingManagement, setIsLoadingManagement] = useState(false);
   const [loadingTracks, setLoadingTracks] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [authUrl, setAuthUrl] = useState('');
 
   useEffect(() => {
     if (isConnecting) {
@@ -103,7 +104,7 @@ function App() {
         folderPath, 
         selectedFolderPath: selectedFolder?.path,
         tracksCount: tracks.length,
-        sampleDurations: tracks.slice(0, 3).map(t => ({ name: t.name, duration: t.duration }))
+        sampleDurations: tracks.slice(0, 3).map((t: Track) => ({ name: t.name, duration: t.duration }))
       });
       
       if (selectedFolder && selectedFolder.path === folderPath) {
@@ -111,7 +112,7 @@ function App() {
         // Update the current playlist with new durations
         const tracksWithAliases = localDataService.applyTrackAliases(tracks);
         setPlaylist(tracksWithAliases);
-        console.log('Playlist updated, new durations:', tracksWithAliases.slice(0, 3).map(t => ({ name: t.name, duration: t.duration })));
+        console.log('Playlist updated, new durations:', tracksWithAliases.slice(0, 3).map((t: Track) => ({ name: t.name, duration: t.duration })));
       } else {
         console.log('Path mismatch - selectedFolder.path:', selectedFolder?.path, 'folderPath:', folderPath);
       }
@@ -245,6 +246,30 @@ function App() {
       ));
     }
   };
+
+  const handleConnect = async () => {
+    const url = await dropboxService.authenticate(false);
+    if (typeof url === 'string') {
+      setAuthUrl(url);
+    }
+  };
+
+  if(authUrl) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
+        <div className="text-center max-w-2xl">
+          <h2 className="text-2xl font-bold mb-4">Dropbox Authentication</h2>
+          <p className="mb-6">Please add the following URL to your Dropbox app's redirect URIs:</p>
+          <div className="bg-gray-800 p-4 rounded-lg mb-6">
+            <p className="text-lg font-mono break-all">{window.location.origin}</p>
+          </div>
+          <a href={authUrl} className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg font-medium transition-colors">
+            Continue to Dropbox
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   if (view === 'connecting') {
     return (
@@ -442,7 +467,7 @@ function App() {
             <h2 className="text-2xl font-bold mb-4">Welcome to MusicSync</h2>
             <p className="text-gray-400 mb-6">Connect your Dropbox account to sync your music folders</p>
             <button
-              onClick={connect}
+              onClick={handleConnect}
               className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg font-medium transition-colors"
             >
               Connect to Dropbox

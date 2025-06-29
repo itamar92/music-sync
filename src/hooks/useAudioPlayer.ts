@@ -4,38 +4,41 @@ import { dropboxService } from '../services/dropboxService';
 
 export const useAudioPlayer = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [playlist, setPlaylist] = useState<Track[]>([]);
   const [state, setState] = useState<AudioPlayerState>({
     currentTrack: null,
     currentTrackIndex: 0,
     isPlaying: false,
     currentTime: 0,
     duration: 0,
-    volume: 0.8
+    volume: 0.8,
   });
 
-  const [playlist, setPlaylist] = useState<Track[]>([]);
+  const isPlayingRef = useRef(state.isPlaying);
+  useEffect(() => {
+    isPlayingRef.current = state.isPlaying;
+  }, [state.isPlaying]);
 
   const updateState = useCallback((updates: Partial<AudioPlayerState>) => {
     setState(prev => ({ ...prev, ...updates }));
   }, []);
 
   const loadTrack = useCallback(async (track: Track, index: number) => {
+    if (audioRef.current) {
+      audioRef.current.src = '';
+      audioRef.current.load();
+    }
+    
+    updateState({
+      currentTrack: track,
+      currentTrackIndex: index,
+      currentTime: 0,
+      duration: 0,
+    });
+
     try {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      }
-
-      updateState({
-        currentTrack: track,
-        currentTrackIndex: index,
-        isPlaying: false,
-        currentTime: 0
-      });
-
       if (track.path && dropboxService.isAuthenticated()) {
         const streamUrl = await dropboxService.getFileStreamUrl(track.path);
-        
         if (audioRef.current) {
           audioRef.current.src = streamUrl;
           audioRef.current.load();
@@ -43,17 +46,14 @@ export const useAudioPlayer = () => {
       }
     } catch (error) {
       console.error('Failed to load track:', error);
+      updateState({ isPlaying: false });
     }
   }, [updateState]);
 
-  const play = useCallback(async () => {
-    if (audioRef.current) {
-      try {
-        await audioRef.current.play();
-        updateState({ isPlaying: true });
-      } catch (error) {
-        console.error('Failed to play:', error);
-      }
+  const play = useCallback(() => {
+    if (audioRef.current && audioRef.current.readyState >= 3) {
+      audioRef.current.play().catch(e => console.error("Error playing audio:", e));
+      updateState({ isPlaying: true });
     }
   }, [updateState]);
 
@@ -73,24 +73,26 @@ export const useAudioPlayer = () => {
   }, [state.isPlaying, play, pause]);
 
   const playNext = useCallback(() => {
-    if (state.currentTrackIndex < playlist.length - 1) {
-      const nextIndex = state.currentTrackIndex + 1;
-      loadTrack(playlist[nextIndex], nextIndex).then(() => {
-        play();
-      });
-    } else {
-      updateState({ isPlaying: false });
-    }
-  }, [state.currentTrackIndex, playlist, loadTrack, play, updateState]);
+    setState(s => {
+      const nextIndex = s.currentTrackIndex + 1;
+      if (nextIndex < playlist.length) {
+        loadTrack(playlist[nextIndex], nextIndex);
+      } else {
+        updateState({ isPlaying: false });
+      }
+      return s;
+    });
+  }, [playlist, loadTrack, updateState]);
 
   const playPrevious = useCallback(() => {
-    if (state.currentTrackIndex > 0) {
-      const prevIndex = state.currentTrackIndex - 1;
-      loadTrack(playlist[prevIndex], prevIndex).then(() => {
-        play();
-      });
-    }
-  }, [state.currentTrackIndex, playlist, loadTrack, play]);
+    setState(s => {
+      const prevIndex = s.currentTrackIndex - 1;
+      if (prevIndex >= 0) {
+        loadTrack(playlist[prevIndex], prevIndex);
+      }
+      return s;
+    });
+  }, [playlist, loadTrack]);
 
   const setVolume = useCallback((volume: number) => {
     if (audioRef.current) {
@@ -100,51 +102,57 @@ export const useAudioPlayer = () => {
   }, [updateState]);
 
   const seek = useCallback((time: number) => {
-    if (audioRef.current) {
+    if (audioRef.current && isFinite(audioRef.current.duration)) {
       audioRef.current.currentTime = time;
-      updateState({ currentTime: time });
     }
-  }, [updateState]);
+  }, []);
 
   const playTrackFromPlaylist = useCallback((track: Track, index: number) => {
-    loadTrack(track, index).then(() => {
-      play();
-    });
-  }, [loadTrack, play]);
+    updateState({ isPlaying: true });
+    loadTrack(track, index);
+  }, [loadTrack, updateState]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const handleTimeUpdate = () => {
-      updateState({ currentTime: audio.currentTime });
-    };
-
     const handleLoadedMetadata = () => {
-      updateState({ duration: audio.duration });
+      updateState({ duration: audio.duration || 0 });
     };
 
     const handleEnded = () => {
-      updateState({ isPlaying: false });
       playNext();
     };
 
-    const handleCanPlay = () => {
-      audio.volume = state.volume;
+    const handleCanPlayThrough = () => {
+      if (isPlayingRef.current) {
+        play();
+      }
     };
 
-    audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('ended', handleEnded);
-    audio.addEventListener('canplay', handleCanPlay);
+    audio.addEventListener('canplaythrough', handleCanPlayThrough);
+
+    let animationFrameId: number;
+    const animate = () => {
+      updateState({ currentTime: audio.currentTime });
+      animationFrameId = requestAnimationFrame(animate);
+    };
+
+    if (state.isPlaying) {
+      animationFrameId = requestAnimationFrame(animate);
+    } else {
+      cancelAnimationFrame(animationFrameId!);
+    }
 
     return () => {
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      cancelAnimationFrame(animationFrameId);
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('ended', handleEnded);
-      audio.removeEventListener('canplay', handleCanPlay);
+      audio.removeEventListener('canplaythrough', handleCanPlayThrough);
     };
-  }, [updateState, playNext, state.volume]);
+  }, [state.isPlaying, playNext, play, updateState]);
 
   return {
     audioRef,
