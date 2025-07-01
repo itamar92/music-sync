@@ -1,0 +1,12 @@
+specVersion: "v1"
+serviceId: "music-sync"
+location: "europe-central2"
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: "fdcdb"
+      cloudSql:
+        instanceId: "music-sync-fdc"
+      # schemaValidation: "COMPATIBLE"
+connectorDirs: ["./connector"]
