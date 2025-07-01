@@ -7,14 +7,14 @@ export interface Track {
   path?: string;
   folderId?: string;
   url?: string;
-  // Aliases for custom names (stored locally)
+  // Aliases for custom names (stored locally or in db)
   displayName?: string;
   displayArtist?: string;
 }
 
 export interface Folder {
   id: string;
-  name: string;
+  name:string;
   path: string;
   trackCount: number;
   synced: boolean;
@@ -22,6 +22,8 @@ export interface Folder {
   isFolder?: boolean;
   parentPath?: string;
   hasSubfolders?: boolean;
+  // Custom display name (stored locally or in db)
+  displayName?: string;
 }
 
 export interface Playlist {
@@ -31,7 +33,7 @@ export interface Playlist {
   createdAt: string;
   type: 'folder' | 'custom';
   folderId?: string;
-  // Custom display name (stored locally)
+  // Custom display name (stored locally or in db)
   displayName?: string;
 }
 
@@ -44,14 +46,3 @@ export interface DropboxFile {
   server_modified: string;
   is_folder: boolean;
 }
-
-export interface AudioPlayerState {
-  currentTrack: Track | null;
-  currentTrackIndex: number;
-  isPlaying: boolean;
-  currentTime: number;
-  duration: number;
-  volume: number;
-}
-
-export type ViewState = 'folders' | 'playlist' | 'connecting';

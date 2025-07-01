@@ -1,3 +1,4 @@
+// src/App.tsx
 import React, { useState, useEffect } from 'react';
 import { 
   Music, 
@@ -13,17 +14,18 @@ import { useAudioPlayer } from './hooks/useAudioPlayer';
 import { dropboxService } from './services/dropboxService';
 import { AudioPlayer } from './components/AudioPlayer';
 import { TrackList } from './components/TrackList';
-import { FolderList } from './components/FolderList';
 import { FolderBrowser } from './components/FolderBrowser';
 import { ConnectionStatus } from './components/ConnectionStatus';
-import { Modal, ShareModal } from './components/Modal';
+import { ShareModal } from './components/Modal';
 import { FolderManagementModal } from './components/FolderManagementModal';
 import { DebugInfo } from './components/DebugInfo';
 import { Folder as FolderType, Track, ViewState, Playlist } from './types';
 import { generateShareLink, copyToClipboard } from './utils/shareUtils';
 import { calculatePlaylistDuration } from './utils/formatTime';
-import { localDataService } from './services/localDataService';
+import { databaseService } from './services/databaseService';
 import { EditableText } from './components/EditableText';
+import { auth } from './services/firebase';
+import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 
 function App() {
   const {
@@ -69,12 +71,23 @@ function App() {
   const [shareModal, setShareModal] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
   const [showFolderSelector, setShowFolderSelector] = useState(false);
-  const [customPlaylists, setCustomPlaylists] = useState<Playlist[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingManagement, setIsLoadingManagement] = useState(false);
   const [loadingTracks, setLoadingTracks] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [authUrl, setAuthUrl] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(user => {
+      if (user) {
+        setUserId(user.uid);
+      } else {
+        setUserId(null);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     if (isConnecting) {
@@ -84,47 +97,6 @@ function App() {
     }
   }, [isConnected, isConnecting]);
 
-  // Load custom playlists from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem('custom_playlists');
-    if (saved) {
-      try {
-        setCustomPlaylists(JSON.parse(saved));
-      } catch (e) {
-        console.error('Error parsing saved playlists:', e);
-      }
-    }
-  }, []);
-
-  // Listen for track duration updates
-  useEffect(() => {
-    const handleDurationUpdates = (event: CustomEvent) => {
-      const { tracks, folderPath } = event.detail;
-      console.log('Duration update event received:', { 
-        folderPath, 
-        selectedFolderPath: selectedFolder?.path,
-        tracksCount: tracks.length,
-        sampleDurations: tracks.slice(0, 3).map((t: Track) => ({ name: t.name, duration: t.duration }))
-      });
-      
-      if (selectedFolder && selectedFolder.path === folderPath) {
-        console.log('Updating playlist with new durations');
-        // Update the current playlist with new durations
-        const tracksWithAliases = localDataService.applyTrackAliases(tracks);
-        setPlaylist(tracksWithAliases);
-        console.log('Playlist updated, new durations:', tracksWithAliases.slice(0, 3).map((t: Track) => ({ name: t.name, duration: t.duration })));
-      } else {
-        console.log('Path mismatch - selectedFolder.path:', selectedFolder?.path, 'folderPath:', folderPath);
-      }
-    };
-
-    window.addEventListener('trackDurationsUpdated', handleDurationUpdates as EventListener);
-    
-    return () => {
-      window.removeEventListener('trackDurationsUpdated', handleDurationUpdates as EventListener);
-    };
-  }, [selectedFolder]);
-
   const handleFolderSelect = async (folder: FolderType) => {
     setSelectedFolder(folder);
     setLoadingTracks(true);
@@ -133,8 +105,7 @@ function App() {
     
     try {
       const tracks = await getTracksFromFolder(folder);
-      const tracksWithAliases = localDataService.applyTrackAliases(tracks);
-      setPlaylist(tracksWithAliases);
+      setPlaylist(tracks);
     } catch (error) {
       console.error('Failed to load tracks:', error);
       setPlaylist([]);
@@ -167,10 +138,6 @@ function App() {
     } finally {
       setIsLoadingManagement(false);
     }
-  };
-
-  const handleLoadFolderDetails = async (folder: FolderType) => {
-    return await dropboxService.getFolderDetails(folder.path);
   };
 
   const handleNavigateToManagementFolder = async (path: string) => {
@@ -216,20 +183,17 @@ function App() {
   };
 
   const handlePlaylistNameChange = (newName: string) => {
-    if (selectedFolder) {
-      localDataService.savePlaylistAlias(selectedFolder.id, newName);
-      // Update the selected folder to reflect the change
+    if (selectedFolder && userId) {
+      databaseService.updateFolderDisplayName(userId, selectedFolder.id, newName);
       setSelectedFolder(prev => prev ? { ...prev, displayName: newName } : null);
-      // Update the folders list to reflect the change in the main view
       updateFolderDisplayName(selectedFolder.id, newName);
     }
   };
 
   const handleTrackNameChange = (trackId: string, newName: string) => {
     const track = playlist.find(t => t.id === trackId);
-    if (track) {
-      localDataService.saveTrackAlias(trackId, newName, track.displayArtist || track.artist);
-      // Update the playlist to reflect the change
+    if (track && userId) {
+      databaseService.updateTrackAlias(userId, trackId, newName, track.displayArtist || track.artist);
       setPlaylist(prev => prev.map(t => 
         t.id === trackId ? { ...t, displayName: newName } : t
       ));
@@ -238,9 +202,8 @@ function App() {
 
   const handleTrackArtistChange = (trackId: string, newArtist: string) => {
     const track = playlist.find(t => t.id === trackId);
-    if (track) {
-      localDataService.saveTrackAlias(trackId, track.displayName || track.name, newArtist);
-      // Update the playlist to reflect the change
+    if (track && userId) {
+      databaseService.updateTrackAlias(userId, trackId, track.displayName || track.name, newArtist);
       setPlaylist(prev => prev.map(t => 
         t.id === trackId ? { ...t, displayArtist: newArtist } : t
       ));
@@ -254,7 +217,37 @@ function App() {
     }
   };
 
-  if(authUrl) {
+  const signIn = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Error signing in with Google", error);
+    }
+  };
+
+  const handleLoadFolderDetails = async (folder: FolderType) => {
+    return await dropboxService.getFolderDetails(folder.path);
+  };
+
+  if (!userId) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
+        <div className="text-center max-w-2xl">
+          <h2 className="text-2xl font-bold mb-4">Welcome to MusicSync</h2>
+          <p className="mb-6">Please sign in with Google to continue.</p>
+          <button
+            onClick={signIn}
+            className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg font-medium transition-colors"
+          >
+            Sign in with Google
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (authUrl) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
         <div className="text-center max-w-2xl">
@@ -297,7 +290,6 @@ function App() {
   if (view === 'playlist' && selectedFolder) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-black via-blue-900 to-black text-white">
-        {/* Header */}
         <header className="bg-black/50 backdrop-blur-sm border-b border-blue-500/20 p-4">
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <div className="flex items-center space-x-4">
@@ -328,7 +320,6 @@ function App() {
         </header>
 
         <div className="max-w-7xl mx-auto p-8">
-          {/* Playlist Header */}
           <div className="flex items-start space-x-8 mb-8">
             <div className="relative group">
               <div className="w-64 h-64 bg-gradient-to-br from-gray-800 to-black rounded-lg flex items-center justify-center border border-gray-700 overflow-hidden">
@@ -354,7 +345,7 @@ function App() {
             
             <div className="flex-1 pt-4">
               <EditableText
-                text={localDataService.getFolderDisplayName(selectedFolder)}
+                text={selectedFolder.displayName || selectedFolder.name}
                 onSave={handlePlaylistNameChange}
                 className="text-4xl font-bold mb-2 block"
                 placeholder="Playlist name..."
@@ -378,7 +369,6 @@ function App() {
             </div>
           </div>
 
-          {/* Track List */}
           <div className="bg-black/30 rounded-lg border border-gray-700/50">
             <div className="p-6">
               {loadingTracks ? (
@@ -415,10 +405,8 @@ function App() {
     );
   }
 
-  // Main folders view
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-blue-900 to-black text-white">
-      {/* Header */}
       <header className="bg-black/50 backdrop-blur-sm border-b border-blue-500/20 p-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -475,7 +463,6 @@ function App() {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
-            {/* Sidebar - Folders */}
             <div className="lg:col-span-1 space-y-6">
               <div className="bg-black/30 backdrop-blur-sm rounded-xl border border-blue-500/20 p-6">
                 <h2 className="text-xl font-semibold mb-6 flex items-center">
@@ -496,7 +483,6 @@ function App() {
               </div>
             </div>
 
-            {/* Main Content */}
             <div className="lg:col-span-2">
               <div className="bg-black/30 backdrop-blur-sm rounded-xl border border-blue-500/20 p-6">
                 <div className="text-center py-12">
@@ -512,13 +498,12 @@ function App() {
         )}
       </div>
 
-      {/* Folder Management Modal */}
       <FolderManagementModal
         isOpen={showFolderSelector}
         onClose={() => setShowFolderSelector(false)}
         folders={managementFolders}
         syncedFolders={syncedFolders}
-        onToggleSync={toggleFolderSync}
+        onToggleSync={(folder) => toggleFolderSync(folder)}
         onNavigateToFolder={handleNavigateToManagementFolder}
         onNavigateBack={navigateManagementBack}
         currentPath={managementPath}
@@ -526,7 +511,6 @@ function App() {
         onLoadFolderDetails={handleLoadFolderDetails}
       />
 
-      {/* Share Modal */}
       <ShareModal
         isOpen={shareModal}
         onClose={() => setShareModal(false)}

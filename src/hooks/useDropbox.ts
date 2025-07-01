@@ -1,6 +1,9 @@
+// src/hooks/useDropbox.ts
 import { useState, useEffect, useCallback } from 'react';
 import { Folder, Track } from '../types';
 import { dropboxService } from '../services/dropboxService';
+import { databaseService } from '../services/databaseService';
+import { auth } from '../services/firebase';
 
 export const useDropbox = () => {
   const [isConnected, setIsConnected] = useState(false);
@@ -12,20 +15,27 @@ export const useDropbox = () => {
   const [currentPath, setCurrentPath] = useState<string>('');
   const [managementFolders, setManagementFolders] = useState<Folder[]>([]);
   const [managementPath, setManagementPath] = useState<string>('');
+  const [userId, setUserId] = useState<string | null>(null);
 
-  // Helper function to load all synced folders (including nested ones)
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(user => {
+      if (user) {
+        setUserId(user.uid);
+      } else {
+        setUserId(null);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
   const loadAllSyncedFolders = useCallback(async (syncedIds: string[]) => {
     const syncedFolders: Folder[] = [];
-    
-    // Load each synced folder's details
     for (const folderId of syncedIds) {
       try {
-        // Try to find the folder in allFolders first (for root folders)
         const rootFolder = allFolders.find(f => f.id === folderId);
         if (rootFolder) {
           syncedFolders.push(rootFolder);
         } else {
-          // For nested folders, we need to get the folder info from the path
           const folderInfo = await dropboxService.getFolderInfo(folderId);
           if (folderInfo) {
             syncedFolders.push(folderInfo);
@@ -35,43 +45,33 @@ export const useDropbox = () => {
         console.warn(`Failed to load synced folder ${folderId}:`, error);
       }
     }
-    
     setFolders(syncedFolders);
   }, [allFolders]);
 
   const loadFolders = useCallback(async (path: string = '') => {
+    if (!userId) return;
     try {
       const folderList = await dropboxService.listFolders(path);
-      
       if (path === '') {
-        // Root level - update all folders and synced folders
         setAllFolders(folderList);
-        
-        // Load synced folders from localStorage
-        const saved = localStorage.getItem('synced_folders');
-        const syncedIds = saved ? JSON.parse(saved) : [];
+        const synced = await databaseService.getSyncedFolders(userId);
+        const syncedIds = synced.map(f => f.folderId);
         setSyncedFolders(syncedIds);
-        
-        // For root level, show all synced folders (including nested ones)
         await loadAllSyncedFolders(syncedIds);
       } else {
-        // Subfolder - show all folders (no filtering by sync status)
         setFolders(folderList);
       }
-      
       setCurrentPath(path);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load folders');
     }
-  }, [loadAllSyncedFolders]);
+  }, [userId, loadAllSyncedFolders]);
 
   const checkConnection = useCallback(async () => {
     try {
       setIsConnecting(true);
       const connected = dropboxService.isAuthenticated();
-      
       if (connected) {
-        // Validate the token before considering it connected
         const isValid = await dropboxService.validateToken();
         if (isValid) {
           setIsConnected(true);
@@ -105,7 +105,6 @@ export const useDropbox = () => {
     try {
       setIsConnecting(true);
       const success = await dropboxService.handleAuthCallback(code);
-      
       if (success) {
         setIsConnected(true);
         await loadFolders();
@@ -117,7 +116,7 @@ export const useDropbox = () => {
     } finally {
       setIsConnecting(false);
     }
-  }, []);
+  }, [loadFolders]);
 
   const refreshFolders = useCallback(async () => {
     if (isConnected) {
@@ -138,17 +137,13 @@ export const useDropbox = () => {
     }
   }, [currentPath, navigateToFolder]);
 
-  // Management folder navigation functions
   const loadManagementFolders = useCallback(async (path: string = '') => {
     try {
       const folderList = await dropboxService.listFolders(path);
-      
-      // Update synced status based on current synced folders
       const foldersWithSyncStatus = folderList.map(folder => ({
         ...folder,
         synced: syncedFolders.includes(folder.id)
       }));
-      
       setManagementFolders(foldersWithSyncStatus);
       setManagementPath(path);
     } catch (err) {
@@ -170,40 +165,20 @@ export const useDropbox = () => {
     }
   }, [managementPath, navigateToManagementFolder]);
 
-  const toggleFolderSync = useCallback((folderId: string) => {
-    setSyncedFolders(prev => {
-      const newSynced = prev.includes(folderId)
-        ? prev.filter(id => id !== folderId)
-        : [...prev, folderId];
-      
-      localStorage.setItem('synced_folders', JSON.stringify(newSynced));
-      
-      // Update allFolders to reflect sync status
-      setAllFolders(prevAll => 
-        prevAll.map(folder => 
-          folder.id === folderId 
-            ? { ...folder, synced: !folder.synced }
-            : folder
-        )
-      );
-      
-      // Update management folders to reflect sync status
-      setManagementFolders(prevManagement =>
-        prevManagement.map(folder =>
-          folder.id === folderId
-            ? { ...folder, synced: !folder.synced }
-            : folder
-        )
-      );
-      
-      // Refresh the synced folders display if we're at root level
-      if (currentPath === '') {
-        loadAllSyncedFolders(newSynced);
+  const toggleFolderSync = useCallback(async (folder: Folder) => {
+    if (!userId) return;
+    try {
+      if (syncedFolders.includes(folder.id)) {
+        await databaseService.unsyncFolder(userId, folder.id);
+      } else {
+        await databaseService.syncFolder(userId, folder);
       }
-      
-      return newSynced;
-    });
-  }, [allFolders, currentPath, loadAllSyncedFolders]);
+      await loadFolders(currentPath);
+    } catch (error) {
+      console.error('Error toggling folder sync:', error);
+      setError('Failed to update sync status');
+    }
+  }, [userId, syncedFolders, currentPath, loadFolders]);
 
   const getTracksFromFolder = useCallback(async (folder: Folder): Promise<Track[]> => {
     try {
@@ -229,38 +204,38 @@ export const useDropbox = () => {
     setFolders([]);
     setAllFolders([]);
     setSyncedFolders([]);
-    localStorage.removeItem('synced_folders');
   }, []);
 
-  const updateFolderDisplayName = useCallback((folderId: string, displayName: string) => {
-    // Update the folders list to reflect the change in the main view
-    setFolders(prevFolders => 
-      prevFolders.map(folder => 
-        folder.id === folderId 
-          ? { ...folder, displayName }
-          : folder
-      )
-    );
-    
-    // Also update allFolders if the folder exists there
-    setAllFolders(prevAll => 
-      prevAll.map(folder => 
-        folder.id === folderId 
-          ? { ...folder, displayName }
-          : folder
-      )
-    );
-  }, []);
+  const updateFolderDisplayName = useCallback(async (folderId: string, displayName: string) => {
+    if (!userId) return;
+    try {
+      await databaseService.updateFolderDisplayName(userId, folderId, displayName);
+      setFolders(prevFolders => 
+        prevFolders.map(folder => 
+          folder.id === folderId 
+            ? { ...folder, displayName }
+            : folder
+        )
+      );
+      setAllFolders(prevAll => 
+        prevAll.map(folder => 
+          folder.id === folderId 
+            ? { ...folder, displayName }
+            : folder
+        )
+      );
+    } catch (error) {
+      console.error('Error updating folder display name:', error);
+      setError('Failed to update folder name');
+    }
+  }, [userId]);
 
   const retry = useCallback(async () => {
     try {
       setError(null);
       setIsConnecting(true);
-      
-      // Check if we have a token first
       const token = localStorage.getItem('dropbox_access_token');
       if (token) {
-        // Try to validate existing token
         dropboxService.setAccessToken(token);
         const isValid = await dropboxService.validateToken();
         if (isValid) {
@@ -268,13 +243,9 @@ export const useDropbox = () => {
           await loadFolders();
           setIsConnecting(false);
         } else {
-          // Token is invalid, start fresh authentication
-          console.log('Existing token is invalid, starting fresh authentication...');
           await connect();
         }
       } else {
-        // No token, start fresh authentication
-        console.log('No token found, starting fresh authentication...');
         await connect();
       }
     } catch (err) {
@@ -285,34 +256,24 @@ export const useDropbox = () => {
     }
   }, [connect, loadFolders]);
 
-  // Handle auth callback from URL and initial connection check
   useEffect(() => {
-    // Check for authorization code (standard flow)
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
-    
-    // Check for access token in hash (implicit flow)
     const hash = window.location.hash;
     const accessTokenMatch = hash.match(/access_token=([^&]+)/);
     const accessToken = accessTokenMatch ? accessTokenMatch[1] : null;
-    
+
     if (code) {
-      console.log('Found auth code in URL, processing callback...');
       handleAuthCallback(code);
-      // Clean up URL
       window.history.replaceState({}, document.title, window.location.pathname);
     } else if (accessToken) {
-      console.log('Found access token in URL hash, using directly...');
-      // Store the token directly
       dropboxService.setAccessToken(accessToken);
       localStorage.setItem('dropbox_access_token', accessToken);
       setIsConnected(true);
       setIsConnecting(false);
       loadFolders();
-      // Clean up URL
       window.history.replaceState({}, document.title, window.location.pathname);
     } else {
-      console.log('No auth code or token in URL, checking existing connection...');
       checkConnection();
     }
   }, [handleAuthCallback, checkConnection, loadFolders]);
