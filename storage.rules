@@ -1,10 +1,36 @@
 rules_version = '2';
 
-// Craft rules based on data in your Firestore database
-// allow write: if firestore.get(
-//    /databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin;
 service firebase.storage {
   match /b/{bucket}/o {
+    // Users can upload and access their own audio files
+    match /audio/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Users can upload and access their own cached track metadata
+    match /metadata/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Users can upload and access their own playlist thumbnails
+    match /thumbnails/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Temporary files for processing (with size limits)
+    match /temp/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && 
+        request.auth.uid == userId &&
+        resource.size < 50 * 1024 * 1024; // 50MB limit for temp files
+    }
+
+    // Public assets (read-only for authenticated users)
+    match /public/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only admins can write to public folder
+    }
+
+    // Deny access to all other paths
     match /{allPaths=**} {
       allow read, write: if false;
     }

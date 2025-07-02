@@ -1,78 +1,177 @@
-# # Example queries for a simple movie app.
+# Queries for Music Sync App
 
-# # @auth() directives control who can call each operation.
-# # Anyone should be able to list all movies, so the auth level is set to PUBLIC
-# query ListMovies @auth(level: PUBLIC) {
-#   movies {
-#     id
-#     title
-#     imageUrl
-#     genre
-#   }
-# }
+# Get current user profile
+query GetUser @auth(level: USER) {
+  user(key: { id_expr: "auth.uid" }) {
+    id
+    email
+    dropboxUserId
+    createdAt
+    updatedAt
+  }
+}
 
-# # List all users, only admins should be able to list all users, so we use NO_ACCESS
-# query ListUsers @auth(level: NO_ACCESS) {
-#   users {
-#     id
-#     username
-#   }
-# }
+# List all synced folders for current user
+query ListSyncedFolders @auth(level: USER) {
+  folderSyncs(where: { 
+    user: { id: { eq_expr: "auth.uid" } }, 
+    isActive: { eq: true } 
+  }) {
+    id
+    folderId
+    folderPath
+    folderName
+    displayName
+    lastSyncAt
+    createdAt
+    updatedAt
+  }
+}
 
-# # Logged in users can list all their reviews and movie titles associated with the review
-# # Since the query uses the uid of the current authenticated user, we set auth level to USER
-# query ListUserReviews @auth(level: USER) {
-#   user(key: { id_expr: "auth.uid" }) {
-#     id
-#     username
-#     # <field>_on_<foreign_key_field> makes it easy to grab info from another table
-#     # Here, we use it to grab all the reviews written by the user.
-#     reviews: reviews_on_user {
-#       rating
-#       reviewDate
-#       reviewText
-#       movie {
-#         id
-#         title
-#       }
-#     }
-#   }
-# }
+# Get specific folder sync by folder ID for current user
+query GetFolderSync($folderId: String!) @auth(level: USER) {
+  folderSyncs(where: { 
+    user: { id: { eq_expr: "auth.uid" } }, 
+    folderId: { eq: $folderId },
+    isActive: { eq: true }
+  }) {
+    id
+    folderId
+    folderPath
+    folderName
+    displayName
+    lastSyncAt
+    createdAt
+    updatedAt
+  }
+}
 
-# # Get movie by id
-# query GetMovieById($id: UUID!) @auth(level: PUBLIC) {
-#   movie(id: $id) {
-#     id
-#     title
-#     imageUrl
-#     genre
-#     metadata: movieMetadata_on_movie {
-#       rating
-#       releaseYear
-#       description
-#     }
-#     reviews: reviews_on_movie {
-#       reviewText
-#       reviewDate
-#       rating
-#       user {
-#         id
-#         username
-#       }
-#     }
-#   }
-# }
+# List all playlists for current user
+query ListPlaylists @auth(level: USER) {
+  playlists(where: { 
+    user: { id: { eq_expr: "auth.uid" } }, 
+    isActive: { eq: true } 
+  }) {
+    id
+    name
+    displayName
+    folderId
+    folderPath
+    type
+    createdAt
+    updatedAt
+  }
+}
 
-# # Search for movies, actors, and reviews
-# query SearchMovie($titleInput: String, $genre: String) @auth(level: PUBLIC) {
-#   movies(
-#     where: {
-#       _and: [{ genre: { eq: $genre } }, { title: { contains: $titleInput } }]
-#     }
-#   ) {
-#     id
-#     title
-#     genre
-#     imageUrl
-#   }
-# }
+# Get specific playlist by ID (only if user owns it)
+query GetPlaylist($playlistId: UUID!) @auth(level: USER) {
+  playlist(id: $playlistId) {
+    id
+    name
+    displayName
+    folderId
+    folderPath
+    type
+    createdAt
+    updatedAt
+    user {
+      id
+    }
+  }
+}
+
+# List tracks for a specific playlist (only if user owns it)
+query GetPlaylistTracks($playlistId: UUID!) @auth(level: USER) {
+  tracks(where: { 
+    playlist: { id: { eq: $playlistId } },
+    user: { id: { eq_expr: "auth.uid" } },
+    isActive: { eq: true }
+  }) {
+    id
+    name
+    displayName
+    artist
+    displayArtist
+    duration
+    durationSeconds
+    filePath
+    folderId
+    createdAt
+    updatedAt
+  }
+}
+
+# Search tracks by name or artist for current user
+query SearchTracks($query: String!) @auth(level: USER) {
+  tracks(where: { 
+    _and: [
+      { user: { id: { eq_expr: "auth.uid" } } },
+      { isActive: { eq: true } },
+      {
+        _or: [
+          { name: { contains: $query } },
+          { displayName: { contains: $query } },
+          { artist: { contains: $query } },
+          { displayArtist: { contains: $query } }
+        ]
+      }
+    ]
+  }) {
+    id
+    name
+    displayName
+    artist
+    displayArtist
+    duration
+    durationSeconds
+    filePath
+    folderId
+    playlist {
+      id
+      name
+      displayName
+    }
+  }
+}
+
+# Get tracks by folder ID for current user
+query GetTracksByFolder($folderId: String!) @auth(level: USER) {
+  tracks(where: { 
+    user: { id: { eq_expr: "auth.uid" } },
+    folderId: { eq: $folderId },
+    isActive: { eq: true }
+  }) {
+    id
+    name
+    displayName
+    artist
+    displayArtist
+    duration
+    durationSeconds
+    filePath
+    folderId
+    playlist {
+      id
+      name
+    }
+  }
+}
+
+# Get sync status for tracks owned by current user
+query GetTrackSyncStatus($trackIds: [UUID!]!) @auth(level: USER) {
+  trackSyncs(where: { 
+    track: { id: { in: $trackIds } },
+    user: { id: { eq_expr: "auth.uid" } }
+  }) {
+    id
+    track {
+      id
+      name
+      artist
+    }
+    lastSyncedAt
+    syncStatus
+    errorMessage
+    updatedAt
+  }
+}

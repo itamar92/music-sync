@@ -1,33 +1,142 @@
-# # Example mutations for a simple movie app
+# Mutations for Music Sync App
 
-# # Create a movie based on user input
-# mutation CreateMovie($title: String!, $genre: String!, $imageUrl: String!)
-# @auth(level: USER_EMAIL_VERIFIED) {
-#   movie_insert(data: { title: $title, genre: $genre, imageUrl: $imageUrl })
-# }
+# Create or update user profile
+mutation UpsertUser($email: String!, $dropboxUserId: String) @auth(level: USER) {
+  user_upsert(data: { 
+    id_expr: "auth.uid", 
+    email: $email, 
+    dropboxUserId: $dropboxUserId 
+  })
+}
 
-# # Upsert (update or insert) a user's username based on their auth.uid
-# mutation UpsertUser($username: String!) @auth(level: USER) {
-#   # The "auth.uid" server value ensures that users can only register their own user.
-#   user_upsert(data: { id_expr: "auth.uid", username: $username })
-# }
+# Add a folder to sync for current user
+mutation SyncFolder(
+  $folderId: String!, 
+  $folderPath: String!, 
+  $folderName: String!, 
+  $displayName: String
+) @auth(level: USER) {
+  folderSync_insert(data: {
+    userId_expr: "auth.uid"
+    folderId: $folderId
+    folderPath: $folderPath
+    folderName: $folderName
+    displayName: $displayName
+    isActive: true
+  })
+}
 
-# # Add a review for a movie
-# mutation AddReview($movieId: UUID!, $rating: Int!, $reviewText: String!)
-# @auth(level: USER) {
-#   review_upsert(
-#     data: {
-#       userId_expr: "auth.uid"
-#       movieId: $movieId
-#       rating: $rating
-#       reviewText: $reviewText
-#       # reviewDate defaults to today in the schema. No need to set it manually.
-#     }
-#   )
-# }
+# Update folder display name (requires folder ID)
+mutation UpdateFolderDisplayName($id: UUID!, $displayName: String!) @auth(level: USER) {
+  folderSync_update(
+    id: $id
+    data: { displayName: $displayName }
+  )
+}
 
-# # Logged in user can delete their review for a movie
-# mutation DeleteReview($movieId: UUID!) @auth(level: USER) {
-#   # The "auth.uid" server value ensures that users can only delete their own reviews.
-#   review_delete(key: { userId_expr: "auth.uid", movieId: $movieId })
-# }
+# Remove a folder from sync (requires folder ID)
+mutation UnsyncFolder($id: UUID!) @auth(level: USER) {
+  folderSync_update(
+    id: $id
+    data: { isActive: false }
+  )
+}
+
+# Create a playlist for current user
+mutation CreatePlaylist(
+  $name: String!, 
+  $displayName: String, 
+  $folderId: String, 
+  $folderPath: String, 
+  $type: String!
+) @auth(level: USER) {
+  playlist_insert(data: {
+    userId_expr: "auth.uid"
+    name: $name
+    displayName: $displayName
+    folderId: $folderId
+    folderPath: $folderPath
+    type: $type
+    isActive: true
+  })
+}
+
+# Update playlist display name
+mutation UpdatePlaylistDisplayName($playlistId: UUID!, $displayName: String!) @auth(level: USER) {
+  playlist_update(
+    id: $playlistId
+    data: { displayName: $displayName }
+  )
+}
+
+# Delete a playlist
+mutation DeletePlaylist($playlistId: UUID!) @auth(level: USER) {
+  playlist_update(
+    id: $playlistId
+    data: { isActive: false }
+  )
+}
+
+# Add a track for current user
+mutation CreateTrack(
+  $name: String!,
+  $displayName: String,
+  $artist: String!,
+  $displayArtist: String,
+  $duration: String!,
+  $durationSeconds: Int!,
+  $filePath: String!,
+  $folderId: String,
+  $playlistId: UUID
+) @auth(level: USER) {
+  track_insert(data: {
+    userId_expr: "auth.uid"
+    name: $name
+    displayName: $displayName
+    artist: $artist
+    displayArtist: $displayArtist
+    duration: $duration
+    durationSeconds: $durationSeconds
+    filePath: $filePath
+    folderId: $folderId
+    playlistId: $playlistId
+    isActive: true
+  })
+}
+
+# Update track display names
+mutation UpdateTrackAlias(
+  $trackId: UUID!, 
+  $displayName: String, 
+  $displayArtist: String
+) @auth(level: USER) {
+  track_update(
+    id: $trackId
+    data: { 
+      displayName: $displayName,
+      displayArtist: $displayArtist
+    }
+  )
+}
+
+# Delete a track
+mutation DeleteTrack($trackId: UUID!) @auth(level: USER) {
+  track_update(
+    id: $trackId
+    data: { isActive: false }
+  )
+}
+
+# Update track sync status for current user
+mutation UpdateTrackSyncStatus(
+  $trackId: UUID!, 
+  $syncStatus: String!, 
+  $errorMessage: String
+) @auth(level: USER) {
+  trackSync_insert(data: {
+    trackId: $trackId
+    userId_expr: "auth.uid"
+    syncStatus: $syncStatus
+    errorMessage: $errorMessage
+  })
+}
