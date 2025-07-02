@@ -1,52 +1,69 @@
-# # Example schema for simple movie review app
+# Music Sync App Schema
 
-# # User table is keyed by Firebase Auth UID.
-# type User @table {
-#   # `@default(expr: "auth.uid")` sets it to Firebase Auth UID during insert and upsert.
-#   id: String! @default(expr: "auth.uid")
-#   username: String! @col(dataType: "varchar(50)")
-#   # The `user: User!` field in the Review table generates the following one-to-many query field.
-#   #  reviews_on_user: [Review!]!
-#   # The `Review` join table the following many-to-many query field.
-#   #  movies_via_Review: [Movie!]!
-# }
+# User table is keyed by Firebase Auth UID
+type User @table {
+  # Firebase Auth UID is automatically set during insert and upsert
+  id: String! @default(expr: "auth.uid")
+  email: String! @col(dataType: "varchar(255)")
+  dropboxUserId: String @col(dataType: "varchar(100)")
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
 
-# # Movie is keyed by a randomly generated UUID.
-# type Movie @table {
-#   # If you do not pass a 'key' to `@table`, Data Connect automatically adds the following 'id' column.
-#   # Feel free to uncomment and customize it.
-#   #  id: UUID! @default(expr: "uuidV4()")
-#   title: String!
-#   imageUrl: String!
-#   genre: String
-# }
+# Folder sync configuration - tracks which Dropbox folders are synced
+type FolderSync @table {
+  id: UUID! @default(expr: "uuidV4()")
+  user: User!
+  folderId: String! @col(dataType: "varchar(255)")
+  folderPath: String! @col(dataType: "text")
+  folderName: String! @col(dataType: "varchar(255)")
+  displayName: String @col(dataType: "varchar(255)")
+  isActive: Boolean! @default(expr: "true")
+  lastSyncAt: Timestamp @default(expr: "request.time")
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
 
-# # MovieMetadata is a metadata attached to a Movie.
-# # Movie <-> MovieMetadata is a one-to-one relationship
-# type MovieMetadata @table {
-#   # @unique ensures each Movie can only one MovieMetadata.
-#   movie: Movie! @unique
-#   # The movie field adds the following foreign key field. Feel free to uncomment and customize it.
-#   #  movieId: UUID!
-#   rating: Float
-#   releaseYear: Int
-#   description: String
-# }
+# Playlists - can be folder-based or custom
+type Playlist @table {
+  id: UUID! @default(expr: "uuidV4()")
+  user: User!
+  name: String! @col(dataType: "varchar(255)")
+  displayName: String @col(dataType: "varchar(255)")
+  folderId: String @col(dataType: "varchar(255)")
+  folderPath: String @col(dataType: "text")
+  type: String! @col(dataType: "varchar(20)") # 'folder' or 'custom'
+  isActive: Boolean! @default(expr: "true")
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
 
-# # Reviews is a join table between User and Movie.
-# # It has a composite primary keys `userUid` and `movieId`.
-# # A user can leave reviews for many movies. A movie can have reviews from many users.
-# # User  <-> Review is a one-to-many relationship
-# # Movie <-> Review is a one-to-many relationship
-# # Movie <-> User is a many-to-many relationship
-# type Review @table(name: "Reviews", key: ["movie", "user"]) {
-#   user: User!
-#   # The user field adds the following foreign key field. Feel free to uncomment and customize it.
-#   #  userUid: String!
-#   movie: Movie!
-#   # The movie field adds the following foreign key field. Feel free to uncomment and customize it.
-#   #  movieId: UUID!
-#   rating: Int
-#   reviewText: String
-#   reviewDate: Date! @default(expr: "request.time")
-# }
+# Individual tracks/songs
+type Track @table {
+  id: UUID! @default(expr: "uuidV4()")
+  user: User!
+  name: String! @col(dataType: "varchar(255)")
+  displayName: String @col(dataType: "varchar(255)")
+  artist: String! @col(dataType: "varchar(255)")
+  displayArtist: String @col(dataType: "varchar(255)")
+  duration: String! @col(dataType: "varchar(20)")
+  durationSeconds: Int!
+  filePath: String! @col(dataType: "text")
+  folderId: String @col(dataType: "varchar(255)")
+  playlist: Playlist
+  isActive: Boolean! @default(expr: "true")
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# Sync status tracking for individual tracks
+type TrackSync @table {
+  id: UUID! @default(expr: "uuidV4()")
+  track: Track! @unique
+  user: User!
+  lastSyncedAt: Timestamp @default(expr: "request.time")
+  syncStatus: String! @col(dataType: "varchar(20)") @default(expr: "'pending'") # 'pending', 'synced', 'error'
+  errorMessage: String @col(dataType: "text")
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
