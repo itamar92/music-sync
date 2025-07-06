@@ -21,6 +21,15 @@
   //    },
   //   ]
   // ]
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "trackSyncs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "syncStatus", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": []
 }
