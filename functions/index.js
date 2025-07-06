@@ -6,6 +6,8 @@ const {onSchedule} = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 const {Dropbox} = require("dropbox");
+const express = require("express");
+const cors = require("cors");
 
 admin.initializeApp();
 
@@ -293,3 +295,215 @@ exports.dropboxWebhook = onRequest(async (req, res) => {
     res.status(405).send("Method not allowed");
   }
 });
+
+// API Functions for frontend integration
+const app = express();
+
+// CORS configuration
+app.use(cors({
+  origin: ["https://music-sync-99dbb.web.app", "http://localhost:3000", "http://localhost:5173"],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+}));
+
+app.use(express.json());
+app.use(express.urlencoded({extended: true}));
+
+// Dropbox service configuration - using environment variables for v2
+let dbx = null;
+const DROPBOX_ACCESS_TOKEN = process.env.DROPBOX_ACCESS_TOKEN;
+
+// Initialize Dropbox
+if (DROPBOX_ACCESS_TOKEN) {
+  dbx = new Dropbox({
+    accessToken: DROPBOX_ACCESS_TOKEN,
+  });
+}
+
+// Cache for API responses
+const cache = new Map();
+
+/**
+ * Generate cache key
+ * @param {string} method - method name
+ * @param {object} params - parameters
+ * @return {string} cache key
+ */
+function getCacheKey(method, params) {
+  return `${method}:${JSON.stringify(params)}`;
+}
+
+/**
+ * Get data from cache
+ * @param {string} key - cache key
+ * @param {number} ttlMinutes - TTL in minutes
+ * @return {any} cached data or null
+ */
+function getFromCache(key, ttlMinutes = 5) {
+  const cached = cache.get(key);
+  if (!cached) return null;
+
+  const now = Date.now();
+  const ttl = ttlMinutes * 60 * 1000;
+  if (now > cached.timestamp + ttl) {
+    cache.delete(key);
+    return null;
+  }
+
+  return cached.data;
+}
+
+/**
+ * Set data in cache
+ * @param {string} key - cache key
+ * @param {any} data - data to cache
+ */
+function setCache(key, data) {
+  cache.set(key, {
+    data,
+    timestamp: Date.now(),
+  });
+}
+
+// API Routes
+app.get("/apiStatus", (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      isInitialized: !!dbx,
+      hasToken: !!DROPBOX_ACCESS_TOKEN,
+      serverTime: new Date().toISOString(),
+    },
+  });
+});
+
+app.get("/listFolders", async (req, res) => {
+  try {
+    if (!dbx) {
+      return res.status(500).json({
+        success: false,
+        error: "Dropbox not initialized",
+      });
+    }
+
+    const {path = ""} = req.query;
+    const cacheKey = getCacheKey("listFolders", {path});
+    const cached = getFromCache(cacheKey, 10);
+
+    if (cached) {
+      return res.json({success: true, data: cached});
+    }
+
+    const response = await dbx.filesListFolder({
+      path: path || "",
+      recursive: false,
+    });
+
+    const folders = response.result.entries
+        .filter((entry) => entry[".tag"] === "folder")
+        .map((entry) => ({
+          id: entry.path_lower,
+          name: entry.name,
+          path: entry.path_lower,
+          trackCount: 0,
+          synced: false,
+          type: "dropbox",
+          isFolder: true,
+          parentPath: path || "",
+          hasSubfolders: true,
+        }));
+
+    setCache(cacheKey, folders);
+    res.json({success: true, data: folders});
+  } catch (error) {
+    logger.error("API Error - listFolders:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+app.get("/getTracks", async (req, res) => {
+  try {
+    if (!dbx) {
+      return res.status(500).json({
+        success: false,
+        error: "Dropbox not initialized",
+      });
+    }
+
+    const {path: folderPath} = req.query;
+    const cacheKey = getCacheKey("getTracksFromFolder", {folderPath});
+    const cached = getFromCache(cacheKey, 20);
+
+    if (cached) {
+      return res.json({success: true, data: cached});
+    }
+
+    const response = await dbx.filesListFolder({
+      path: folderPath,
+      recursive: false,
+    });
+
+    const audioExtensions = [".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg"];
+    const tracks = [];
+
+    for (const entry of response.result.entries) {
+      if (entry[".tag"] === "file" &&
+          entry.path_lower &&
+          audioExtensions.some((ext) =>
+            entry.name.toLowerCase().endsWith(ext))) {
+        tracks.push({
+          id: entry.path_lower,
+          name: entry.name.replace(/\.[^/.]+$/, ""),
+          artist: "Unknown Artist",
+          duration: "0:00",
+          durationSeconds: 0,
+          path: entry.path_lower,
+          folderId: folderPath,
+        });
+      }
+    }
+
+    setCache(cacheKey, tracks);
+    res.json({success: true, data: tracks});
+  } catch (error) {
+    logger.error("API Error - getTracksFromFolder:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+app.get("/getStreamUrl", async (req, res) => {
+  try {
+    if (!dbx) {
+      return res.status(500).json({
+        success: false,
+        error: "Dropbox not initialized",
+      });
+    }
+
+    const {path: filePath} = req.query;
+    const response = await dbx.filesGetTemporaryLink({
+      path: filePath,
+    });
+
+    res.json({
+      success: true,
+      data: {streamUrl: response.result.link},
+    });
+  } catch (error) {
+    logger.error("API Error - getFileStreamUrl:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// Export the Express app as a Firebase Function
+exports.api = onRequest(app);

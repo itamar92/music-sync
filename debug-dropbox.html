@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Dropbox Connection</title>
+</head>
+<body>
+    <h1>Dropbox Connection Debug</h1>
+    <div id="status"></div>
+    <div id="actions">
+        <button onclick="checkStorage()">Check LocalStorage</button>
+        <button onclick="clearStorage()">Clear Storage</button>
+        <button onclick="testDropbox()">Test Direct Connection</button>
+    </div>
+    <div id="results"></div>
+
+    <script>
+        function log(message) {
+            document.getElementById('results').innerHTML += '<p>' + message + '</p>';
+        }
+
+        function checkStorage() {
+            log('=== Checking LocalStorage ===');
+            const token = localStorage.getItem('dropbox_access_token');
+            if (token) {
+                log('Found token: ' + token.substring(0, 50) + '...');
+            } else {
+                log('No token found in localStorage');
+            }
+            
+            // Check all storage
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.includes('dropbox')) {
+                    log(key + ': ' + localStorage.getItem(key)?.substring(0, 50) + '...');
+                }
+            }
+        }
+
+        function clearStorage() {
+            localStorage.removeItem('dropbox_access_token');
+            log('Cleared dropbox_access_token from localStorage');
+        }
+
+        async function testDropbox() {
+            log('=== Testing Direct Dropbox Connection ===');
+            const token = 'sl.u.AF0I7QpxhrUBD1y106f9IBr0-RohvhkF_d68wUBUzRiCI0XHYg4GisAi_UZ8bUDloRKBAQGuyQhjCPUy-tGwcJQvX0cAJ6Y50jL_mKTH2-VBeTvUu6c05DZBwLUGpcvrKOkJDKGc-ZrSWZiqfc8GMzXt9FL5KsqnwIsOrCTSW2iVmhWDMs_CrFpV-HgjqpB4jlAf0siY8txIjiNhStWJxfykUnYAx87PaRAcUC6rGgAOIGadDxTUjdP1-L6y0W55ksQqyKU6avhl_MFNzruqVJtu1TJLDuuCgUEZIMY0wf64_EoUOlDQGq1kaGuP4VTbEusY0wexBjBhgpMaNXk6agvhR-WsjNi8K4yyg6_blqfMdu8PlfJgIUzehAs39je2pP-WT8lz4Q_IpL6VoWrha55Jwieefm8p9rK1dSoAxMr-LDfZEusy4AEYkGOpwpWa-lhfhKMnVSmym64BsvDrBP4UdeA-0C54QJFrVY_oFTNkM1HtsSU7FTsPkejtRJCkupsbfkGV0-QqpUAc8IB6t_4-5IGsjsxrctuUYA6r923mYR4vWj_80PD6j_enCvTkDicY540otqacwMF1o6MeCbIVpw7YORPtjuEnDwKpSPqqeu01A3lsU_EjLNgbcFjA3Xc0viY4JOmIsXYrF29yKlBY8esNnnpVfumj8UYmPdpHcyOaFGqJubNBhGr4iGr1IaalJbyFmrlpligAmHxUjTlI3FKzNbcQiSIIYROOAOYtp99r99cI4s8mXrnUUmNVQGdHxy0Ws6FLpKhF1eaLz7Yzvuv8OOTdRpjLP5Zk3YYEVajVkGxqdmb0lTcazlZZocjEDSxXlNlezb2ev3iOP0dthzuMlej2YgdBiDgAnnD7cWnKDVwPfdBrTAUX8jonpWfXqq23gcNnGbBvx6SJrSKDC7v61iYhH2fhvKOrCNptraFLhEFNp1y9l-9lbpbehfNnewos_ub4jJBpCn9GwFLwpjVi4eGmS0wS9qIi3QY8eR5iQlUS9-2xt9T8VywOf1woytLTxgYLxIg9bEJQzqMWOEqDh4SDUb_kop2pHDiYCJjCed1r3dw4iEBWlNLX83FZql6hPOZspjG6IwOXxamDlpl814gn758Qj78ch4Xmx7GiAn-sT_byQPdDtLEYVdAPCQE35kAs74c1bycBWWNT6bbSlpTH7ZOergtDUncbP';
+            
+            try {
+                const response = await fetch('https://api.dropboxapi.com/2/users/get_current_account', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Direct API works! User: ' + data.name.display_name);
+                    
+                    // Store the working token
+                    localStorage.setItem('dropbox_access_token', token);
+                    log('✅ Stored working token in localStorage');
+                } else {
+                    log('❌ Direct API failed: ' + response.status + ' ' + response.statusText);
+                }
+            } catch (error) {
+                log('❌ Error: ' + error.message);
+            }
+        }
+
+        // Run initial check
+        checkStorage();
+    </script>
+</body>
+</html>
