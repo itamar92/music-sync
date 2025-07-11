@@ -1,5 +1,6 @@
 import { Dropbox, DropboxAuth, files } from 'dropbox';
 import { Track, Folder } from '../types';
+import { apiService } from './apiService';
 
 class DropboxService {
   private dbx: Dropbox | null = null;
@@ -11,6 +12,7 @@ class DropboxService {
   private minRequestInterval = 100; // Minimum 100ms between requests
   private cache = new Map<string, { data: any; timestamp: number; ttl: number }>();
   private maxRetries = 3;
+  private useServerApi = import.meta.env.VITE_USE_SERVER_API === 'true' || true; // Default to server-side
 
   constructor() {
     this.initializeAuth();
@@ -191,10 +193,22 @@ class DropboxService {
   }
 
   isAuthenticated(): boolean {
+    if (this.useServerApi) {
+      return true; // Server handles authentication
+    }
     return !!this.accessToken && !!this.dbx;
   }
 
   async validateToken(): Promise<boolean> {
+    if (this.useServerApi) {
+      try {
+        return await apiService.checkStatus().then(status => status.isInitialized && status.hasToken);
+      } catch (error) {
+        console.warn('Server validation failed:', error);
+        return false;
+      }
+    }
+
     if (!this.dbx || !this.accessToken) {
       return false;
     }
@@ -216,6 +230,10 @@ class DropboxService {
   }
 
   async listFolders(path: string = ''): Promise<Folder[]> {
+    if (this.useServerApi) {
+      return await apiService.listFolders(path);
+    }
+
     if (!this.dbx) {
       throw new Error('Not connected to Dropbox. Please reconnect.');
     }
@@ -365,6 +383,10 @@ class DropboxService {
   }
 
   async getFolderDetails(folderPath: string): Promise<{trackCount: number, hasSubfolders: boolean}> {
+    if (this.useServerApi) {
+      return await apiService.getFolderDetails(folderPath);
+    }
+
     if (!this.dbx) {
       throw new Error('Not authenticated');
     }
@@ -407,6 +429,10 @@ class DropboxService {
   }
 
   async getTracksFromFolder(folderPath: string): Promise<Track[]> {
+    if (this.useServerApi) {
+      return await apiService.getTracksFromFolder(folderPath);
+    }
+
     if (!this.dbx) {
       throw new Error('Not authenticated');
     }
@@ -604,6 +630,10 @@ class DropboxService {
   }
 
   async getFileStreamUrl(filePath: string): Promise<string> {
+    if (this.useServerApi) {
+      return await apiService.getFileStreamUrl(filePath);
+    }
+
     if (!this.dbx) {
       throw new Error('Not authenticated');
     }

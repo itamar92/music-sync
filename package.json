@@ -12,11 +12,14 @@
   },
   "dependencies": {
     "@firebasegen/default-connector": "file:dataconnect-generated/js/default-connector",
+    "@types/react-router-dom": "^5.3.3",
     "dropbox": "^10.34.0",
     "firebase": "^11.9.1",
     "lucide-react": "^0.263.1",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-firebase-hooks": "^5.1.1",
+    "react-router-dom": "^7.6.3"
   },
   "devDependencies": {
     "@types/react": "^18.2.15",

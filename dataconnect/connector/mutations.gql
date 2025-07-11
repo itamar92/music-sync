@@ -1,83 +1,171 @@
 # Mutations for Music Sync App
 
 # Create or update user profile
-mutation UpsertUser($email: String!, $dropboxUserId: String) @auth(level: USER) {
+mutation UpsertUser($email: String!, $dropboxUserId: String, $role: String) @auth(level: USER) {
   user_upsert(data: { 
     id_expr: "auth.uid", 
     email: $email, 
-    dropboxUserId: $dropboxUserId 
+    dropboxUserId: $dropboxUserId,
+    role: $role
   })
 }
 
-# Add a folder to sync for current user
+# ADMIN MUTATIONS (admin only)
+
+# Create a collection (admin only)
+mutation CreateCollection(
+  $name: String!, 
+  $displayName: String!, 
+  $description: String,
+  $coverImageUrl: String,
+  $isPublic: Boolean,
+  $sortOrder: Int
+) @auth(level: USER) {
+  collection_insert(data: {
+    name: $name
+    displayName: $displayName
+    description: $description
+    coverImageUrl: $coverImageUrl
+    isPublic: $isPublic
+    sortOrder: $sortOrder
+    createdById_expr: "auth.uid"
+  }) @where(expr: "auth.uid in (select id from User where role = 'admin')")
+}
+
+# Update collection (admin only)
+mutation UpdateCollection(
+  $collectionId: UUID!,
+  $name: String, 
+  $displayName: String, 
+  $description: String,
+  $coverImageUrl: String,
+  $isPublic: Boolean,
+  $sortOrder: Int
+) @auth(level: USER) {
+  collection_update(
+    id: $collectionId
+    data: { 
+      name: $name
+      displayName: $displayName
+      description: $description
+      coverImageUrl: $coverImageUrl
+      isPublic: $isPublic
+      sortOrder: $sortOrder
+    }
+  ) @where(expr: "auth.uid in (select id from User where role = 'admin')")
+}
+
+# Add a folder to sync (admin only)
 mutation SyncFolder(
   $folderId: String!, 
   $folderPath: String!, 
   $folderName: String!, 
-  $displayName: String
+  $displayName: String,
+  $collectionId: UUID!
 ) @auth(level: USER) {
   folderSync_insert(data: {
-    userId_expr: "auth.uid"
     folderId: $folderId
     folderPath: $folderPath
     folderName: $folderName
     displayName: $displayName
+    collectionId: $collectionId
     isActive: true
-  })
+    createdById_expr: "auth.uid"
+  }) @where(expr: "auth.uid in (select id from User where role = 'admin')")
 }
 
-# Update folder display name (requires folder ID)
-mutation UpdateFolderDisplayName($id: UUID!, $displayName: String!) @auth(level: USER) {
+# Update folder sync (admin only)
+mutation UpdateFolderSync(
+  $id: UUID!, 
+  $displayName: String,
+  $collectionId: UUID,
+  $isActive: Boolean
+) @auth(level: USER) {
   folderSync_update(
     id: $id
-    data: { displayName: $displayName }
-  )
+    data: { 
+      displayName: $displayName
+      collectionId: $collectionId
+      isActive: $isActive
+    }
+  ) @where(expr: "auth.uid in (select id from User where role = 'admin')")
 }
 
-# Remove a folder from sync (requires folder ID)
+# Remove a folder from sync (admin only)
 mutation UnsyncFolder($id: UUID!) @auth(level: USER) {
   folderSync_update(
     id: $id
     data: { isActive: false }
-  )
+  ) @where(expr: "auth.uid in (select id from User where role = 'admin')")
 }
 
-# Create a playlist for current user
+# Create a playlist (admin only)
 mutation CreatePlaylist(
   $name: String!, 
-  $displayName: String, 
+  $displayName: String!, 
+  $description: String,
+  $coverImageUrl: String,
   $folderId: String, 
   $folderPath: String, 
-  $type: String!
+  $collectionId: UUID!,
+  $type: String!,
+  $isPublic: Boolean,
+  $sortOrder: Int
 ) @auth(level: USER) {
   playlist_insert(data: {
-    userId_expr: "auth.uid"
     name: $name
     displayName: $displayName
+    description: $description
+    coverImageUrl: $coverImageUrl
     folderId: $folderId
     folderPath: $folderPath
+    collectionId: $collectionId
     type: $type
-    isActive: true
-  })
+    isPublic: $isPublic
+    sortOrder: $sortOrder
+    totalTracks: 0
+    createdById_expr: "auth.uid"
+  }) @where(expr: "auth.uid in (select id from User where role = 'admin')")
 }
 
-# Update playlist display name
-mutation UpdatePlaylistDisplayName($playlistId: UUID!, $displayName: String!) @auth(level: USER) {
+# Update playlist (admin only)
+mutation UpdatePlaylist(
+  $playlistId: UUID!, 
+  $name: String,
+  $displayName: String,
+  $description: String,
+  $coverImageUrl: String,
+  $collectionId: UUID,
+  $isPublic: Boolean,
+  $sortOrder: Int,
+  $totalTracks: Int,
+  $totalDuration: String
+) @auth(level: USER) {
   playlist_update(
     id: $playlistId
-    data: { displayName: $displayName }
-  )
+    data: { 
+      name: $name
+      displayName: $displayName
+      description: $description
+      coverImageUrl: $coverImageUrl
+      collectionId: $collectionId
+      isPublic: $isPublic
+      sortOrder: $sortOrder
+      totalTracks: $totalTracks
+      totalDuration: $totalDuration
+    }
+  ) @where(expr: "auth.uid in (select id from User where role = 'admin')")
 }
 
-# Delete a playlist
+# Delete a playlist (admin only)
 mutation DeletePlaylist($playlistId: UUID!) @auth(level: USER) {
   playlist_update(
     id: $playlistId
     data: { isActive: false }
-  )
+  ) @where(expr: "auth.uid in (select id from User where role = 'admin')")
 }
 
-# Add a track for current user
+# Add a track (admin only)
 mutation CreateTrack(
   $name: String!,
   $displayName: String,
@@ -87,10 +175,10 @@ mutation CreateTrack(
   $durationSeconds: Int!,
   $filePath: String!,
   $folderId: String,
-  $playlistId: UUID
+  $playlistId: UUID!,
+  $trackNumber: Int
 ) @auth(level: USER) {
   track_insert(data: {
-    userId_expr: "auth.uid"
     name: $name
     displayName: $displayName
     artist: $artist
@@ -100,34 +188,48 @@ mutation CreateTrack(
     filePath: $filePath
     folderId: $folderId
     playlistId: $playlistId
+    trackNumber: $trackNumber
     isActive: true
-  })
+    createdById_expr: "auth.uid"
+  }) @where(expr: "auth.uid in (select id from User where role = 'admin')")
 }
 
-# Update track display names
-mutation UpdateTrackAlias(
+# Update track (admin only)
+mutation UpdateTrack(
   $trackId: UUID!, 
+  $name: String,
   $displayName: String, 
-  $displayArtist: String
+  $artist: String,
+  $displayArtist: String,
+  $duration: String,
+  $durationSeconds: Int,
+  $trackNumber: Int,
+  $isActive: Boolean
 ) @auth(level: USER) {
   track_update(
     id: $trackId
     data: { 
-      displayName: $displayName,
+      name: $name
+      displayName: $displayName
+      artist: $artist
       displayArtist: $displayArtist
+      duration: $duration
+      durationSeconds: $durationSeconds
+      trackNumber: $trackNumber
+      isActive: $isActive
     }
-  )
+  ) @where(expr: "auth.uid in (select id from User where role = 'admin')")
 }
 
-# Delete a track
+# Delete a track (admin only)
 mutation DeleteTrack($trackId: UUID!) @auth(level: USER) {
   track_update(
     id: $trackId
     data: { isActive: false }
-  )
+  ) @where(expr: "auth.uid in (select id from User where role = 'admin')")
 }
 
-# Update track sync status for current user
+# Update track sync status (admin only)
 mutation UpdateTrackSyncStatus(
   $trackId: UUID!, 
   $syncStatus: String!, 
@@ -135,8 +237,8 @@ mutation UpdateTrackSyncStatus(
 ) @auth(level: USER) {
   trackSync_insert(data: {
     trackId: $trackId
-    userId_expr: "auth.uid"
     syncStatus: $syncStatus
     errorMessage: $errorMessage
-  })
+    createdById_expr: "auth.uid"
+  }) @where(expr: "auth.uid in (select id from User where role = 'admin')")
 }

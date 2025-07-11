@@ -6,87 +6,234 @@ query GetUser @auth(level: USER) {
     id
     email
     dropboxUserId
+    role
+    isActive
     createdAt
     updatedAt
   }
 }
 
-# List all synced folders for current user
-query ListSyncedFolders @auth(level: USER) {
-  folderSyncs(where: { 
-    user: { id: { eq_expr: "auth.uid" } }, 
-    isActive: { eq: true } 
-  }) {
-    id
-    folderId
-    folderPath
-    folderName
-    displayName
-    lastSyncAt
-    createdAt
-    updatedAt
-  }
-}
+# PUBLIC QUERIES (no auth required)
 
-# Get specific folder sync by folder ID for current user
-query GetFolderSync($folderId: String!) @auth(level: USER) {
-  folderSyncs(where: { 
-    user: { id: { eq_expr: "auth.uid" } }, 
-    folderId: { eq: $folderId },
-    isActive: { eq: true }
-  }) {
-    id
-    folderId
-    folderPath
-    folderName
-    displayName
-    lastSyncAt
-    createdAt
-    updatedAt
-  }
-}
-
-# List all playlists for current user
-query ListPlaylists @auth(level: USER) {
-  playlists(where: { 
-    user: { id: { eq_expr: "auth.uid" } }, 
-    isActive: { eq: true } 
-  }) {
+# List all public collections
+query ListPublicCollections {
+  collections(where: { 
+    isPublic: { eq: true } 
+  }, orderBy: { sortOrder: ASC }) {
     id
     name
     displayName
-    folderId
-    folderPath
-    type
+    description
+    coverImageUrl
+    sortOrder
     createdAt
     updatedAt
   }
 }
 
-# Get specific playlist by ID (only if user owns it)
-query GetPlaylist($playlistId: UUID!) @auth(level: USER) {
+# Get public collection with its playlists
+query GetPublicCollection($collectionId: UUID!) {
+  collection(id: $collectionId) {
+    id
+    name
+    displayName
+    description
+    coverImageUrl
+    isPublic
+    createdAt
+    updatedAt
+  }
+}
+
+# List public playlists for a collection
+query ListPublicPlaylists($collectionId: UUID!) {
+  playlists(where: { 
+    collection: { id: { eq: $collectionId } },
+    isPublic: { eq: true }
+  }, orderBy: { sortOrder: ASC }) {
+    id
+    name
+    displayName
+    description
+    coverImageUrl
+    totalTracks
+    totalDuration
+    sortOrder
+    createdAt
+    updatedAt
+  }
+}
+
+# Get public playlist with tracks
+query GetPublicPlaylist($playlistId: UUID!) {
   playlist(id: $playlistId) {
     id
     name
     displayName
-    folderId
-    folderPath
-    type
+    description
+    coverImageUrl
+    totalTracks
+    totalDuration
+    isPublic
+    collection {
+      id
+      name
+      displayName
+    }
     createdAt
     updatedAt
-    user {
-      id
-    }
   }
 }
 
-# List tracks for a specific playlist (only if user owns it)
+# Get tracks for a public playlist
+query GetPublicPlaylistTracks($playlistId: UUID!) {
+  tracks(where: { 
+    playlist: { id: { eq: $playlistId } },
+    isActive: { eq: true }
+  }, orderBy: { trackNumber: ASC }) {
+    id
+    name
+    displayName
+    artist
+    displayArtist
+    duration
+    durationSeconds
+    trackNumber
+    filePath
+  }
+}
+
+# ADMIN QUERIES (admin auth required)
+
+# List all collections (admin only)
+query ListAllCollections @auth(level: USER) {
+  collections(orderBy: { sortOrder: ASC }) @where(expr: "auth.uid in (select id from User where role = 'admin')") {
+    id
+    name
+    displayName
+    description
+    coverImageUrl
+    isPublic
+    sortOrder
+    createdBy {
+      email
+    }
+    createdAt
+    updatedAt
+  }
+}
+
+# List all synced folders (admin only)
+query ListAllSyncedFolders @auth(level: USER) {
+  folderSyncs(where: { 
+    isActive: { eq: true } 
+  }) @where(expr: "auth.uid in (select id from User where role = 'admin')") {
+    id
+    folderId
+    folderPath
+    folderName
+    displayName
+    collection {
+      id
+      name
+      displayName
+    }
+    lastSyncAt
+    createdBy {
+      email
+    }
+    createdAt
+    updatedAt
+  }
+}
+
+# Get specific folder sync by folder ID (admin only)
+query GetFolderSync($folderId: String!) @auth(level: USER) {
+  folderSyncs(where: { 
+    folderId: { eq: $folderId },
+    isActive: { eq: true }
+  }) @where(expr: "auth.uid in (select id from User where role = 'admin')") {
+    id
+    folderId
+    folderPath
+    folderName
+    displayName
+    collection {
+      id
+      name
+      displayName
+    }
+    lastSyncAt
+    createdBy {
+      email
+    }
+    createdAt
+    updatedAt
+  }
+}
+
+# List all playlists (admin only)
+query ListAllPlaylists @auth(level: USER) {
+  playlists(orderBy: { collection: { sortOrder: ASC }, sortOrder: ASC }) @where(expr: "auth.uid in (select id from User where role = 'admin')") {
+    id
+    name
+    displayName
+    description
+    coverImageUrl
+    folderId
+    folderPath
+    collection {
+      id
+      name
+      displayName
+    }
+    type
+    isPublic
+    sortOrder
+    totalTracks
+    totalDuration
+    createdBy {
+      email
+    }
+    createdAt
+    updatedAt
+  }
+}
+
+# Get specific playlist by ID (admin only)
+query GetPlaylist($playlistId: UUID!) @auth(level: USER) {
+  playlist(id: $playlistId) @where(expr: "auth.uid in (select id from User where role = 'admin')") {
+    id
+    name
+    displayName
+    description
+    coverImageUrl
+    folderId
+    folderPath
+    collection {
+      id
+      name
+      displayName
+    }
+    type
+    isPublic
+    sortOrder
+    totalTracks
+    totalDuration
+    createdBy {
+      email
+    }
+    createdAt
+    updatedAt
+  }
+}
+
+# List tracks for a specific playlist (admin only)
 query GetPlaylistTracks($playlistId: UUID!) @auth(level: USER) {
   tracks(where: { 
     playlist: { id: { eq: $playlistId } },
-    user: { id: { eq_expr: "auth.uid" } },
     isActive: { eq: true }
-  }) {
+  }, orderBy: { trackNumber: ASC }) @where(expr: "auth.uid in (select id from User where role = 'admin')") {
     id
     name
     displayName
@@ -96,16 +243,19 @@ query GetPlaylistTracks($playlistId: UUID!) @auth(level: USER) {
     durationSeconds
     filePath
     folderId
+    trackNumber
+    createdBy {
+      email
+    }
     createdAt
     updatedAt
   }
 }
 
-# Search tracks by name or artist for current user
+# Search tracks by name or artist (admin only)
 query SearchTracks($query: String!) @auth(level: USER) {
   tracks(where: { 
     _and: [
-      { user: { id: { eq_expr: "auth.uid" } } },
       { isActive: { eq: true } },
       {
         _or: [
@@ -116,7 +266,7 @@ query SearchTracks($query: String!) @auth(level: USER) {
         ]
       }
     ]
-  }) {
+  }) @where(expr: "auth.uid in (select id from User where role = 'admin')") {
     id
     name
     displayName
@@ -126,6 +276,36 @@ query SearchTracks($query: String!) @auth(level: USER) {
     durationSeconds
     filePath
     folderId
+    trackNumber
+    playlist {
+      id
+      name
+      displayName
+      collection {
+        id
+        name
+        displayName
+      }
+    }
+  }
+}
+
+# Get tracks by folder ID (admin only)
+query GetTracksByFolder($folderId: String!) @auth(level: USER) {
+  tracks(where: { 
+    folderId: { eq: $folderId },
+    isActive: { eq: true }
+  }, orderBy: { trackNumber: ASC }) @where(expr: "auth.uid in (select id from User where role = 'admin')") {
+    id
+    name
+    displayName
+    artist
+    displayArtist
+    duration
+    durationSeconds
+    filePath
+    folderId
+    trackNumber
     playlist {
       id
       name
@@ -134,35 +314,11 @@ query SearchTracks($query: String!) @auth(level: USER) {
   }
 }
 
-# Get tracks by folder ID for current user
-query GetTracksByFolder($folderId: String!) @auth(level: USER) {
-  tracks(where: { 
-    user: { id: { eq_expr: "auth.uid" } },
-    folderId: { eq: $folderId },
-    isActive: { eq: true }
-  }) {
-    id
-    name
-    displayName
-    artist
-    displayArtist
-    duration
-    durationSeconds
-    filePath
-    folderId
-    playlist {
-      id
-      name
-    }
-  }
-}
-
-# Get sync status for tracks owned by current user
+# Get sync status for tracks (admin only)
 query GetTrackSyncStatus($trackIds: [UUID!]!) @auth(level: USER) {
   trackSyncs(where: { 
-    track: { id: { in: $trackIds } },
-    user: { id: { eq_expr: "auth.uid" } }
-  }) {
+    track: { id: { in: $trackIds } }
+  }) @where(expr: "auth.uid in (select id from User where role = 'admin')") {
     id
     track {
       id
@@ -172,6 +328,9 @@ query GetTrackSyncStatus($trackIds: [UUID!]!) @auth(level: USER) {
     lastSyncedAt
     syncStatus
     errorMessage
+    createdBy {
+      email
+    }
     updatedAt
   }
 }

@@ -310,15 +310,90 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({extended: true}));
 
-// Dropbox service configuration - using environment variables for v2
+// Dropbox service configuration - using environment variables for v2 gen
 let dbx = null;
-const DROPBOX_ACCESS_TOKEN = process.env.DROPBOX_ACCESS_TOKEN;
+const DROPBOX_ACCESS_TOKEN = process.env.DROPBOX_ACCESS_TOKEN || "";
+const DROPBOX_REFRESH_TOKEN = process.env.DROPBOX_REFRESH_TOKEN || "";
+const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY || "";
+const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET || "";
 
-// Initialize Dropbox
-if (DROPBOX_ACCESS_TOKEN) {
-  dbx = new Dropbox({
-    accessToken: DROPBOX_ACCESS_TOKEN,
-  });
+/**
+ * Refresh the Dropbox access token using the refresh token
+ * @return {Promise<string>} New access token
+ */
+async function refreshDropboxToken() {
+  if (!DROPBOX_REFRESH_TOKEN || !DROPBOX_APP_KEY || !DROPBOX_APP_SECRET) {
+    throw new Error("Missing refresh token configuration");
+  }
+
+  try {
+    const response = await fetch("https://api.dropboxapi.com/oauth2/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: DROPBOX_REFRESH_TOKEN,
+        client_id: DROPBOX_APP_KEY,
+        client_secret: DROPBOX_APP_SECRET,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      throw new Error(`Token refresh failed: ${
+        data.error_description || data.error
+      }`);
+    }
+
+    logger.info("Successfully refreshed Dropbox access token");
+    return data.access_token;
+  } catch (error) {
+    logger.error("Error refreshing Dropbox token:", error);
+    throw error;
+  }
+}
+
+/**
+ * Get Dropbox client with automatic token refresh
+ * @return {Promise<Dropbox>} Dropbox client instance
+ */
+async function getDropboxClient() {
+  if (!dbx) {
+    let accessToken = DROPBOX_ACCESS_TOKEN;
+
+    // If we have a refresh token, try to get a fresh access token
+    if (DROPBOX_REFRESH_TOKEN && !accessToken) {
+      accessToken = await refreshDropboxToken();
+    }
+
+    if (accessToken) {
+      dbx = new Dropbox({
+        accessToken: accessToken,
+      });
+    }
+  }
+
+  // Test the token and refresh if needed
+  if (dbx) {
+    try {
+      await dbx.usersGetCurrentAccount();
+    } catch (error) {
+      if (error.status === 401 && DROPBOX_REFRESH_TOKEN) {
+        logger.info("Access token expired, refreshing...");
+        const newToken = await refreshDropboxToken();
+        dbx = new Dropbox({
+          accessToken: newToken,
+        });
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  return dbx;
 }
 
 // Cache for API responses
@@ -367,19 +442,33 @@ function setCache(key, data) {
 }
 
 // API Routes
-app.get("/apiStatus", (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      isInitialized: !!dbx,
-      hasToken: !!DROPBOX_ACCESS_TOKEN,
-      serverTime: new Date().toISOString(),
-    },
-  });
+app.get("/apiStatus", async (req, res) => {
+  try {
+    const dropboxClient = await getDropboxClient();
+    res.json({
+      success: true,
+      data: {
+        isInitialized: !!dropboxClient,
+        hasToken: !!DROPBOX_ACCESS_TOKEN || !!DROPBOX_REFRESH_TOKEN,
+        serverTime: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      data: {
+        isInitialized: false,
+        hasToken: false,
+        serverTime: new Date().toISOString(),
+        error: error.message,
+      },
+    });
+  }
 });
 
 app.get("/listFolders", async (req, res) => {
   try {
+    const dbx = await getDropboxClient();
     if (!dbx) {
       return res.status(500).json({
         success: false,
@@ -427,6 +516,7 @@ app.get("/listFolders", async (req, res) => {
 
 app.get("/getTracks", async (req, res) => {
   try {
+    const dbx = await getDropboxClient();
     if (!dbx) {
       return res.status(500).json({
         success: false,
@@ -480,6 +570,7 @@ app.get("/getTracks", async (req, res) => {
 
 app.get("/getStreamUrl", async (req, res) => {
   try {
+    const dbx = await getDropboxClient();
     if (!dbx) {
       return res.status(500).json({
         success: false,
@@ -506,4 +597,14 @@ app.get("/getStreamUrl", async (req, res) => {
 });
 
 // Export the Express app as a Firebase Function
-exports.api = onRequest(app);
+exports.api = onRequest(
+    {
+      secrets: [
+        "DROPBOX_ACCESS_TOKEN",
+        "DROPBOX_REFRESH_TOKEN",
+        "DROPBOX_APP_KEY",
+        "DROPBOX_APP_SECRET",
+      ],
+    },
+    app,
+);
