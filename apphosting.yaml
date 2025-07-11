@@ -20,3 +20,48 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: VITE_DROPBOX_APP_KEY
+    value: 8vxmrswkyhxie9q
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: VITE_FIREBASE_API_KEY
+    value: AIzaSyBlh_RdNmLX9ZULueLj3PonV3Ek0934b_c
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: VITE_FIREBASE_AUTH_DOMAIN
+    value: music-sync-99dbb.firebaseapp.com
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: VITE_FIREBASE_PROJECT_ID
+    value: music-sync-99dbb
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: VITE_FIREBASE_STORAGE_BUCKET
+    value: music-sync-99dbb.firebasestorage.app
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: VITE_FIREBASE_MESSAGING_SENDER_ID
+    value: "833104619713"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: VITE_FIREBASE_APP_ID
+    value: 1:833104619713:web:4507010e3d42a6df040c40
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: VITE_API_BASE_URL
+    value: https://api-4oudeccelq-uc.a.run.app
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: VITE_USE_SERVER_API
+    value: "true"
+    availability:
+      - BUILD
+      - RUNTIME

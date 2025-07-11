@@ -30,32 +30,49 @@ export const useDropbox = () => {
 
   const loadAllSyncedFolders = useCallback(async (syncedIds: string[]) => {
     const syncedFolders: Folder[] = [];
+    
+    // Load custom display names for anonymous users
+    const localNames = !userId ? localStorage.getItem('folderDisplayNames') : null;
+    const folderNames = localNames ? JSON.parse(localNames) : {};
+    
     for (const folderId of syncedIds) {
       try {
-        const rootFolder = allFolders.find(f => f.id === folderId);
-        if (rootFolder) {
-          syncedFolders.push(rootFolder);
-        } else {
-          const folderInfo = await dropboxService.getFolderInfo(folderId);
-          if (folderInfo) {
-            syncedFolders.push(folderInfo);
+        let folder = allFolders.find(f => f.id === folderId);
+        if (!folder) {
+          folder = await dropboxService.getFolderInfo(folderId);
+        }
+        
+        if (folder) {
+          // Apply custom display name if available
+          if (!userId && folderNames[folderId]) {
+            folder = { ...folder, displayName: folderNames[folderId] };
           }
+          syncedFolders.push(folder);
         }
       } catch (error) {
         console.warn(`Failed to load synced folder ${folderId}:`, error);
       }
     }
     setFolders(syncedFolders);
-  }, [allFolders]);
+  }, [allFolders, userId]);
 
   const loadFolders = useCallback(async (path: string = '') => {
-    if (!userId) return;
     try {
       const folderList = await dropboxService.listFolders(path);
       if (path === '') {
         setAllFolders(folderList);
-        const synced = await databaseService.getSyncedFolders(userId);
-        const syncedIds = synced.map(f => f.folderId);
+        let syncedIds: string[] = [];
+        
+        if (userId) {
+          // Authenticated user - use database
+          const synced = await databaseService.getSyncedFolders(userId);
+          syncedIds = synced.map(f => f.folderId);
+        } else {
+          // Anonymous user - use localStorage
+          const localSynced = localStorage.getItem('syncedFolders');
+          syncedIds = localSynced ? JSON.parse(localSynced) : [];
+        }
+        
         setSyncedFolders(syncedIds);
         await loadAllSyncedFolders(syncedIds);
       } else {
@@ -166,19 +183,38 @@ export const useDropbox = () => {
   }, [managementPath, navigateToManagementFolder]);
 
   const toggleFolderSync = useCallback(async (folder: Folder) => {
-    if (!userId) return;
     try {
-      if (syncedFolders.includes(folder.id)) {
-        await databaseService.unsyncFolder(userId, folder.id);
+      const isCurrentlySynced = syncedFolders.includes(folder.id);
+      let newSyncedIds: string[];
+
+      if (isCurrentlySynced) {
+        // Remove from synced
+        newSyncedIds = syncedFolders.filter(id => id !== folder.id);
       } else {
-        await databaseService.syncFolder(userId, folder);
+        // Add to synced
+        newSyncedIds = [...syncedFolders, folder.id];
       }
-      await loadFolders(currentPath);
+
+      if (userId) {
+        // Authenticated user - update database
+        if (isCurrentlySynced) {
+          await databaseService.unsyncFolder(userId, folder.id);
+        } else {
+          await databaseService.syncFolder(userId, folder);
+        }
+      } else {
+        // Anonymous user - update localStorage
+        localStorage.setItem('syncedFolders', JSON.stringify(newSyncedIds));
+      }
+
+      // Update local state
+      setSyncedFolders(newSyncedIds);
+      await loadAllSyncedFolders(newSyncedIds);
     } catch (error) {
       console.error('Error toggling folder sync:', error);
       setError('Failed to update sync status');
     }
-  }, [userId, syncedFolders, currentPath, loadFolders]);
+  }, [userId, syncedFolders, loadAllSyncedFolders]);
 
   const getTracksFromFolder = useCallback(async (folder: Folder): Promise<Track[]> => {
     try {
@@ -207,9 +243,19 @@ export const useDropbox = () => {
   }, []);
 
   const updateFolderDisplayName = useCallback(async (folderId: string, displayName: string) => {
-    if (!userId) return;
     try {
-      await databaseService.updateFolderDisplayName(userId, folderId, displayName);
+      if (userId) {
+        // Authenticated user - update database
+        await databaseService.updateFolderDisplayName(userId, folderId, displayName);
+      } else {
+        // Anonymous user - store in localStorage
+        const localNames = localStorage.getItem('folderDisplayNames');
+        const folderNames = localNames ? JSON.parse(localNames) : {};
+        folderNames[folderId] = displayName;
+        localStorage.setItem('folderDisplayNames', JSON.stringify(folderNames));
+      }
+
+      // Update local state
       setFolders(prevFolders => 
         prevFolders.map(folder => 
           folder.id === folderId 

@@ -1,3 +1,26 @@
+export interface User {
+  id: string;
+  email: string;
+  dropboxUserId?: string;
+  role: 'admin' | 'user';
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Collection {
+  id: string;
+  name: string;
+  displayName: string;
+  description?: string;
+  coverImageUrl?: string;
+  isPublic: boolean;
+  sortOrder: number;
+  createdBy?: User;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Track {
   id: string;
   name: string;
@@ -7,14 +30,21 @@ export interface Track {
   path?: string;
   folderId?: string;
   url?: string;
+  filePath?: string;
+  trackNumber?: number;
+  playlist?: Playlist;
   // Aliases for custom names (stored locally or in db)
   displayName?: string;
   displayArtist?: string;
+  isActive?: boolean;
+  createdBy?: User;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Folder {
   id: string;
-  name:string;
+  name: string;
   path: string;
   trackCount: number;
   synced: boolean;
@@ -22,19 +52,35 @@ export interface Folder {
   isFolder?: boolean;
   parentPath?: string;
   hasSubfolders?: boolean;
+  collection?: Collection;
   // Custom display name (stored locally or in db)
   displayName?: string;
+  isActive?: boolean;
+  createdBy?: User;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Playlist {
   id: string;
   name: string;
-  tracks: Track[];
-  createdAt: string;
-  type: 'folder' | 'custom';
-  folderId?: string;
-  // Custom display name (stored locally or in db)
   displayName?: string;
+  description?: string;
+  coverImageUrl?: string;
+  tracks?: Track[];
+  folderId?: string;
+  folderPath?: string;
+  collection?: Collection;
+  type: 'folder' | 'custom';
+  isPublic: boolean;
+  sortOrder: number;
+  totalTracks: number;
+  totalDuration?: string;
+  // Custom display name (stored locally or in db)
+  isActive?: boolean;
+  createdBy?: User;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface DropboxFile {

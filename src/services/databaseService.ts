@@ -8,6 +8,8 @@ export interface UserEntity {
   id: string;
   email: string;
   dropboxUserId: string;
+  role: 'admin' | 'user';
+  isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -85,10 +87,20 @@ class DatabaseServiceImpl implements DatabaseService {
     const userRef = await addDoc(collection(db, 'users'), {
       email,
       dropboxUserId,
+      role: 'user',
+      isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    return { id: userRef.id, email, dropboxUserId, createdAt: new Date(), updatedAt: new Date() };
+    return { 
+      id: userRef.id, 
+      email, 
+      dropboxUserId, 
+      role: 'user', 
+      isActive: true, 
+      createdAt: new Date(), 
+      updatedAt: new Date() 
+    };
   }
 
   async getUser(userId: string): Promise<UserEntity | null> {
