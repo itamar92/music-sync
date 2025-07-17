@@ -16,6 +16,8 @@ import { FolderSyncManagement } from './components/admin/FolderSyncManagement';
 import { PlaylistManagement } from './components/admin/PlaylistManagement';
 import { AdminOverview } from './components/admin/AdminOverview';
 import { AdminSettings } from './components/admin/AdminSettings';
+import { GlobalAudioPlayer } from './components/GlobalAudioPlayer';
+import logoImg from '../Logo_IM icon.png';
 
 export const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -85,9 +87,7 @@ export const AdminDashboard: React.FC = () => {
       `}>
         <div className="flex items-center justify-between p-6">
           <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center">
-              <Music className="w-5 h-5" />
-            </div>
+            <img src={logoImg} alt="App Logo" className="w-20 h-20 object-contain" />
             <span className="text-lg font-bold">Admin Panel</span>
           </div>
           <button
@@ -173,6 +173,9 @@ export const AdminDashboard: React.FC = () => {
           </Routes>
         </main>
       </div>
+      
+      {/* Global Audio Player */}
+      <GlobalAudioPlayer />
     </div>
   );
 };

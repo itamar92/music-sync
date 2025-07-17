@@ -15,9 +15,23 @@ service cloud.firestore {
         request.auth.uid == request.resource.data.userId;
     }
 
-    // Users can only access their own playlists
+    // Users can only access their own collections, but public collections are readable by anyone
+    match /collections/{collectionId} {
+      allow read: if (request.auth != null && 
+        request.auth.uid == resource.data.userId) || 
+        resource.data.isPublic == true;
+      allow write: if request.auth != null && 
+        request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+    }
+
+    // Users can only access their own playlists, but public playlists are readable by anyone
     match /playlists/{playlistId} {
-      allow read, write: if request.auth != null && 
+      allow read: if (request.auth != null && 
+        request.auth.uid == resource.data.userId) || 
+        resource.data.isPublic == true;
+      allow write: if request.auth != null && 
         request.auth.uid == resource.data.userId;
       allow create: if request.auth != null && 
         request.auth.uid == request.resource.data.userId;
