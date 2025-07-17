@@ -71,6 +71,7 @@ export interface Playlist {
   folderId?: string;
   folderPath?: string;
   collection?: Collection;
+  collectionId?: string; // ID reference to collection
   type: 'folder' | 'custom';
   isPublic: boolean;
   sortOrder: number;

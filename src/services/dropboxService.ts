@@ -12,7 +12,7 @@ class DropboxService {
   private minRequestInterval = 100; // Minimum 100ms between requests
   private cache = new Map<string, { data: any; timestamp: number; ttl: number }>();
   private maxRetries = 3;
-  private useServerApi = import.meta.env.VITE_USE_SERVER_API === 'true' || true; // Default to server-side
+  private useServerApi = import.meta.env.VITE_USE_SERVER_API === 'true' && false; // Force client-side for now
 
   constructor() {
     this.initializeAuth();
@@ -20,34 +20,32 @@ class DropboxService {
 
   private initializeAuth() {
     const clientId = import.meta.env.VITE_DROPBOX_APP_KEY;
-    console.log('Initializing Dropbox with App Key:', clientId ? 'Found' : 'Missing');
+    console.log('Dropbox Init: App Key found:', clientId ? 'YES' : 'NO');
+    console.log('Dropbox Init: App Key value:', clientId);
     
     if (!clientId) {
-      console.error('Dropbox App Key not found in environment variables');
-      console.error('Make sure VITE_DROPBOX_APP_KEY is set in your .env.local file');
+      console.error('Dropbox Init: App Key not found in environment variables');
+      console.error('Dropbox Init: Make sure VITE_DROPBOX_APP_KEY is set in your .env.local file');
       return;
     }
 
     try {
+      console.log('Dropbox Init: Creating DropboxAuth instance...');
       this.dbxAuth = new DropboxAuth({
         clientId,
         fetch: fetch.bind(window)
       });
+      console.log('Dropbox Init: DropboxAuth created successfully');
 
       const token = localStorage.getItem('dropbox_access_token');
       if (token) {
-        console.log('Found existing access token, attempting to use it');
+        console.log('Dropbox Init: Found existing access token, attempting to use it');
         this.setAccessToken(token);
       } else {
-        console.log('No existing access token found');
-        // Try the verified working token as fallback
-        const workingToken = 'sl.u.AF0I7QpxhrUBD1y106f9IBr0-RohvhkF_d68wUBUzRiCI0XHYg4GisAi_UZ8bUDloRKBAQGuyQhjCPUy-tGwcJQvX0cAJ6Y50jL_mKTH2-VBeTvUu6c05DZBwLUGpcvrKOkJDKGc-ZrSWZiqfc8GMzXt9FL5KsqnwIsOrCTSW2iVmhWDMs_CrFpV-HgjqpB4jlAf0siY8txIjiNhStWJxfykUnYAx87PaRAcUC6rGgAOIGadDxTUjdP1-L6y0W55ksQqyKU6avhl_MFNzruqVJtu1TJLDuuCgUEZIMY0wf64_EoUOlDQGq1kaGuP4VTbEusY0wexBjBhgpMaNXk6agvhR-WsjNi8K4yyg6_blqfMdu8PlfJgIUzehAs39je2pP-WT8lz4Q_IpL6VoWrha55Jwieefm8p9rK1dSoAxMr-LDfZEusy4AEYkGOpwpWa-lhfhKMnVSmym64BsvDrBP4UdeA-0C54QJFrVY_oFTNkM1HtsSU7FTsPkejtRJCkupsbfkGV0-QqpUAc8IB6t_4-5IGsjsxrctuUYA6r923mYR4vWj_80PD6j_enCvTkDicY540otqacwMF1o6MeCbIVpw7YORPtjuEnDwKpSPqqeu01A3lsU_EjLNgbcFjA3Xc0viY4JOmIsXYrF29yKlBY8esNnnpVfumj8UYmPdpHcyOaFGqJubNBhGr4iGr1IaalJbyFmrlpligAmHxUjTlI3FKzNbcQiSIIYc6yjxUSaZ9F249UzigQbGY2z5J5n5bNJxW6rD8y9Hu7AaEJjsHf3LYdKKDMJhWOKj_8cKZQxrjhJhu03kld-1mLZ9Fd2ogkv0X1OLWu11meSX2WYwr-Tq1RhL-p1ZI5DqiJBQXQc_TSKakP4sY6t6H2KyytnVeyyJ37WymEhiyq1xIlcTFopy5AV2gZ7zP44YYGwWE7Fj3UgN6mqo2Mj601xxHE-ImzeW4uAFTD393KWaOzxImq0CCX13v_vNoZ3jw7XKgegI_IvB-0vpEGwO9c4axtMbadYtk7WoLSHzDrUApOXYGyHPO3et0EkIehIZuTHmOsW61efELr1RM_G3Tuv05VDMhiHfTOOwmyUtM6iv6XCs3Gh6qdS67pQG_8yvu-AH9FYZ95MyGFLDYsohNXR-c9_twNxiyQzk_5w5Y9R9pNnvX_qGDqYsulqx6mlaVNQZx2iWqMQHui9olUULKgnBgLHbwc26yL1EHes9c0MKs8sdu2ycbbWGaLmkFlOxkDPDvdHIfPSb432za7wI_HsN3opxEdZGUBToGvgZBjj6Xz3Cbr';
-        console.log('Using fallback working token');
-        this.setAccessToken(workingToken);
-        localStorage.setItem('dropbox_access_token', workingToken);
+        console.log('Dropbox Init: No existing access token found - user needs to authenticate');
       }
     } catch (error) {
-      console.error('Failed to initialize DropboxAuth:', error);
+      console.error('Dropbox Init: Failed to initialize DropboxAuth:', error);
     }
   }
 
@@ -58,7 +56,8 @@ class DropboxService {
 
     try {
       const redirectUri = window.location.origin;
-      const authUrl = await this.dbxAuth.getAuthenticationUrl(redirectUri);
+      // Use implicit grant flow to get access token directly
+      const authUrl = await this.dbxAuth.getAuthenticationUrl(redirectUri, undefined, 'token');
       
       if (redirect) {
         window.location.href = authUrl as string;
@@ -78,18 +77,15 @@ class DropboxService {
     }
 
     try {
-      console.log('Handling auth callback with code:', code);
       const redirectUri = window.location.origin;
       await this.dbxAuth.getAccessTokenFromCode(redirectUri, code);
       const token = this.dbxAuth.getAccessToken();
       
       if (token) {
-        console.log('Successfully obtained access token');
         this.setAccessToken(token);
         localStorage.setItem('dropbox_access_token', token);
         return true;
       }
-      console.error('No access token received');
       return false;
     } catch (error) {
       console.error('Auth callback failed:', error);
@@ -129,6 +125,20 @@ class DropboxService {
       timestamp: Date.now(),
       ttl
     });
+    
+    // Clean up expired entries occasionally to prevent memory leaks
+    if (this.cache.size > 100) {
+      this.cleanupExpiredCache();
+    }
+  }
+
+  private cleanupExpiredCache(): void {
+    const now = Date.now();
+    for (const [key, cached] of this.cache.entries()) {
+      if (now > cached.timestamp + cached.ttl) {
+        this.cache.delete(key);
+      }
+    }
   }
 
   private async throttledRequest<T>(requestFn: () => Promise<T>): Promise<T> {
@@ -276,8 +286,8 @@ class DropboxService {
         }
       }
 
-      // Cache the results for 10 minutes
-      this.setCache(cacheKey, folders, 10);
+      // Cache the results for 15 minutes
+      this.setCache(cacheKey, folders, 15);
       
       return folders;
     } catch (error: any) {
@@ -418,8 +428,8 @@ class DropboxService {
 
       const result = { trackCount, hasSubfolders };
       
-      // Cache folder details for 15 minutes
-      this.setCache(cacheKey, result, 15);
+      // Cache folder details for 20 minutes
+      this.setCache(cacheKey, result, 20);
       
       return result;
     } catch (error) {
@@ -493,7 +503,6 @@ class DropboxService {
   }
 
   private async loadTrackDurationsAsync(tracks: Track[], cacheKey: string): Promise<void> {
-    console.log('loadTrackDurationsAsync called with', tracks.length, 'tracks');
     try {
       // Load durations in parallel, but limit concurrency to avoid overwhelming the API
       const BATCH_SIZE = 3;
@@ -503,15 +512,12 @@ class DropboxService {
         
         await Promise.all(batch.map(async (track) => {
           try {
-            console.log(`Getting duration for ${track.name}...`);
             if(track.path) {
               const durationSeconds = await this.getAudioDuration(track.path);
-              console.log(`Got duration for ${track.name}: ${durationSeconds}s`);
               track.duration = this.formatDuration(durationSeconds);
               track.durationSeconds = durationSeconds;
             }
           } catch (error) {
-            console.warn(`Failed to load duration for ${track.name}:`, error);
             // Keep default 0:00 duration on error
           }
         }));
@@ -526,11 +532,6 @@ class DropboxService {
       this.setCache(cacheKey, tracks, 20);
       
       // Emit custom event to notify UI about duration updates
-      console.log('Emitting trackDurationsUpdated event:', { 
-        folderPath: tracks[0]?.folderId, 
-        tracksCount: tracks.length,
-        sampleDurations: tracks.slice(0, 3).map(t => ({ name: t.name, duration: t.duration }))
-      });
       window.dispatchEvent(new CustomEvent('trackDurationsUpdated', { 
         detail: { tracks, folderPath: tracks[0]?.folderId } 
       }));
@@ -541,20 +542,16 @@ class DropboxService {
   }
 
   private async getAudioDuration(filePath: string): Promise<number> {
-    console.log(`getAudioDuration called for: ${filePath}`);
     try {
       // Check cache first for duration
       const durationCacheKey = this.getCacheKey('duration', { filePath });
       const cachedDuration = this.getFromCache<number>(durationCacheKey);
       if (cachedDuration !== null) {
-        console.log(`Using cached duration for ${filePath}: ${cachedDuration}s`);
         return cachedDuration;
       }
 
       // Get a temporary link to the file
-      console.log(`Getting stream URL for: ${filePath}`);
       const streamUrl = await this.getFileStreamUrl(filePath);
-      console.log(`Got stream URL: ${streamUrl.substring(0, 50)}...`);
       
       // Create audio element to get metadata
       const duration = await new Promise<number>((resolve) => {
@@ -576,7 +573,6 @@ class DropboxService {
         
         const onLoadedMetadata = () => {
           if (!resolved) {
-            console.log(`loadedmetadata event for ${filePath}, duration: ${audio.duration}`);
             resolved = true;
             cleanup();
             resolve(audio.duration && !isNaN(audio.duration) ? audio.duration : 0);
@@ -585,7 +581,6 @@ class DropboxService {
         
         const onError = (error: any) => {
           if (!resolved) {
-            console.warn(`Audio error for ${filePath}:`, error, audio.error);
             resolved = true;
             cleanup();
             resolve(0);
@@ -605,7 +600,6 @@ class DropboxService {
           }
         }, 10000);
         
-        console.log(`Setting audio src for ${filePath}`);
         audio.src = streamUrl;
       });
 

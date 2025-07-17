@@ -17,6 +17,7 @@ export const useDropbox = () => {
   const [managementPath, setManagementPath] = useState<string>('');
   const [userId, setUserId] = useState<string | null>(null);
 
+
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(user => {
       if (user) {
@@ -39,7 +40,7 @@ export const useDropbox = () => {
       try {
         let folder = allFolders.find(f => f.id === folderId);
         if (!folder) {
-          folder = await dropboxService.getFolderInfo(folderId);
+          folder = (await dropboxService.getFolderInfo(folderId)) || undefined;
         }
         
         if (folder) {
@@ -99,6 +100,7 @@ export const useDropbox = () => {
         }
       } else {
         setIsConnected(false);
+        setError('Please connect to Dropbox to access your folders.');
       }
     } catch (err) {
       console.error('Connection check failed:', err);
@@ -112,23 +114,36 @@ export const useDropbox = () => {
   const connect = useCallback(async () => {
     try {
       setError(null);
-      await dropboxService.authenticate();
+      console.log('useDropbox: Starting authentication process...');
+      const result = await dropboxService.authenticate();
+      console.log('useDropbox: Authentication result:', result);
     } catch (err) {
+      console.error('useDropbox: Authentication error:', err);
       setError(err instanceof Error ? err.message : 'Authentication failed');
     }
   }, []);
 
   const handleAuthCallback = useCallback(async (code: string) => {
     try {
+      console.log('useDropbox handleAuthCallback: Starting with code:', code);
       setIsConnecting(true);
+      setError(null);
+      
       const success = await dropboxService.handleAuthCallback(code);
+      console.log('useDropbox handleAuthCallback: Service returned success:', success);
+      
       if (success) {
+        console.log('useDropbox handleAuthCallback: Setting connected to true');
         setIsConnected(true);
+        console.log('useDropbox handleAuthCallback: Loading folders...');
         await loadFolders();
+        console.log('useDropbox handleAuthCallback: Complete!');
       } else {
+        console.error('useDropbox handleAuthCallback: Authentication failed');
         setError('Authentication failed');
       }
     } catch (err) {
+      console.error('useDropbox handleAuthCallback: Error occurred:', err);
       setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
       setIsConnecting(false);
@@ -157,12 +172,59 @@ export const useDropbox = () => {
   const loadManagementFolders = useCallback(async (path: string = '') => {
     try {
       const folderList = await dropboxService.listFolders(path);
-      const foldersWithSyncStatus = folderList.map(folder => ({
+      
+      // Set basic folder data immediately for fast display
+      const basicFolders = folderList.map(folder => ({
         ...folder,
+        trackCount: 0,
+        hasSubfolders: true,
         synced: syncedFolders.includes(folder.id)
       }));
-      setManagementFolders(foldersWithSyncStatus);
+      
+      setManagementFolders(basicFolders);
       setManagementPath(path);
+      
+      // Load folder details in smaller batches to avoid overwhelming the API
+      const BATCH_SIZE = 3;
+      const detailedFolders = [...basicFolders];
+      
+      for (let i = 0; i < folderList.length; i += BATCH_SIZE) {
+        const batch = folderList.slice(i, i + BATCH_SIZE);
+        
+        const batchDetails = await Promise.allSettled(
+          batch.map(async (folder, batchIndex) => {
+            try {
+              const details = await dropboxService.getFolderDetails(folder.path);
+              const actualIndex = i + batchIndex;
+              return { actualIndex, details };
+            } catch (error) {
+              console.warn(`Failed to load details for folder ${folder.path}:`, error);
+              return { actualIndex: i + batchIndex, details: null };
+            }
+          })
+        );
+        
+        // Update the folders with loaded details
+        batchDetails.forEach((result) => {
+          if (result.status === 'fulfilled' && result.value.details) {
+            const { actualIndex, details } = result.value;
+            detailedFolders[actualIndex] = {
+              ...detailedFolders[actualIndex],
+              trackCount: details.trackCount,
+              hasSubfolders: details.hasSubfolders
+            };
+          }
+        });
+        
+        // Update UI with each batch to show progressive loading
+        setManagementFolders([...detailedFolders]);
+        
+        // Small delay between batches to avoid rate limiting
+        if (i + BATCH_SIZE < folderList.length) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+      
     } catch (err) {
       console.error('Error loading management folders:', err);
       setError(err instanceof Error ? err.message : 'Failed to load management folders');
@@ -307,22 +369,62 @@ export const useDropbox = () => {
     const code = urlParams.get('code');
     const hash = window.location.hash;
     const accessTokenMatch = hash.match(/access_token=([^&]+)/);
-    const accessToken = accessTokenMatch ? accessTokenMatch[1] : null;
+    const accessToken = accessTokenMatch ? decodeURIComponent(accessTokenMatch[1]) : null;
+    const errorParam = urlParams.get('error');
+    const errorDescription = urlParams.get('error_description');
+
+    if (errorParam) {
+      console.error('useDropbox: OAuth error received:', errorParam);
+      console.error('useDropbox: OAuth error description:', errorDescription);
+      setError(`OAuth error: ${errorParam} - ${errorDescription}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
+    }
 
     if (code) {
       handleAuthCallback(code);
       window.history.replaceState({}, document.title, window.location.pathname);
+      
+      // Check if we need to reopen a modal after auth
+      const authInProgress = localStorage.getItem('dropbox_auth_in_progress');
+      const authModal = localStorage.getItem('dropbox_auth_modal');
+      if (authInProgress === 'true' && authModal === 'folder_add') {
+        localStorage.removeItem('dropbox_auth_in_progress');
+        localStorage.removeItem('dropbox_auth_modal');
+        window.dispatchEvent(new CustomEvent('dropbox_auth_complete', { detail: { modal: 'folder_add' } }));
+      }
     } else if (accessToken) {
-      dropboxService.setAccessToken(accessToken);
-      localStorage.setItem('dropbox_access_token', accessToken);
-      setIsConnected(true);
-      setIsConnecting(false);
-      loadFolders();
+      try {
+        dropboxService.setAccessToken(accessToken);
+        localStorage.setItem('dropbox_access_token', accessToken);
+        
+        setIsConnected(true);
+        setIsConnecting(false);
+        
+        (async () => {
+          await loadFolders();
+          // Check if we need to reopen a modal after auth
+          const authInProgress = localStorage.getItem('dropbox_auth_in_progress');
+          const authModal = localStorage.getItem('dropbox_auth_modal');
+          if (authInProgress === 'true' && authModal === 'folder_add') {
+            localStorage.removeItem('dropbox_auth_in_progress');
+            localStorage.removeItem('dropbox_auth_modal');
+            window.dispatchEvent(new CustomEvent('dropbox_auth_complete', { detail: { modal: 'folder_add' } }));
+          } else {
+            window.dispatchEvent(new CustomEvent('dropbox_auth_complete', { detail: { modal: null } }));
+          }
+        })();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Token processing failed');
+      }
+      
       window.history.replaceState({}, document.title, window.location.pathname);
     } else {
-      checkConnection();
+      if (!error || error === 'Please connect to Dropbox to access your folders.') {
+        checkConnection();
+      }
     }
-  }, [handleAuthCallback, checkConnection, loadFolders]);
+  }, [handleAuthCallback, checkConnection, loadFolders, error]);
 
   return {
     isConnected,

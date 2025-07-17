@@ -1,8 +1,17 @@
 import React from 'react';
 import { Play, Pause, SkipForward, SkipBack, Volume2, Music } from 'lucide-react';
-import { AudioPlayerState, Track } from '../types';
+import { Track } from '../types';
 import { formatTime } from '../utils/formatTime';
 import { localDataService } from '../services/localDataService';
+
+export interface AudioPlayerState {
+  currentTrack: Track | null;
+  currentTrackIndex: number;
+  isPlaying: boolean;
+  currentTime: number;
+  duration: number;
+  volume: number;
+}
 
 interface AudioPlayerProps {
   audioRef: React.RefObject<HTMLAudioElement>;

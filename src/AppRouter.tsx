@@ -22,12 +22,13 @@ export const AppRouter: React.FC = () => {
   return (
     <Router>
       <Routes>
-        {/* Public routes */}
+        {/* Public routes - accessible to everyone */}
         <Route path="/" element={<PublicApp />} />
         <Route path="/collection/:collectionId" element={<PublicApp />} />
         <Route path="/playlist/:playlistId" element={<PublicApp />} />
+        <Route path="/public" element={<PublicApp />} />
         
-        {/* Admin routes */}
+        {/* Admin routes - only accessible to admins */}
         <Route 
           path="/admin/*" 
           element={
