@@ -1,10 +1,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Track, AudioPlayerState } from '../types';
 import { dropboxService } from '../services/dropboxService';
+import { cachedTrackService } from '../services/cachedTrackService';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../services/firebase';
 
 export const useAudioPlayer = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playlist, setPlaylist] = useState<Track[]>([]);
+  const [user] = useAuthState(auth);
   const [state, setState] = useState<AudioPlayerState>({
     currentTrack: null,
     currentTrackIndex: 0,
@@ -24,22 +28,44 @@ export const useAudioPlayer = () => {
   }, []);
 
   const loadTrack = useCallback(async (track: Track, index: number) => {
+    console.log('Loading track:', track.name, 'Duration:', track.duration, 'DurationSeconds:', track.durationSeconds);
+    
     if (audioRef.current) {
       audioRef.current.src = '';
       audioRef.current.load();
     }
     
+    // Use track's duration info if available
+    const initialDuration = track.durationSeconds || 0;
+    
     updateState({
       currentTrack: track,
       currentTrackIndex: index,
       currentTime: 0,
-      duration: 0,
+      duration: initialDuration,
     });
 
     try {
-      if (track.path && dropboxService.isAuthenticated()) {
-        const streamUrl = await dropboxService.getFileStreamUrl(track.path);
+      if (track.path) {
+        let streamUrl: string;
+        
+        // Use cached stream URL if user is authenticated
+        if (user && track.id) {
+          streamUrl = await cachedTrackService.getStreamUrl(user.uid, track.id, track.path);
+        } else if (dropboxService.isAuthenticated()) {
+          // Fallback to direct Dropbox call
+          streamUrl = await dropboxService.getFileStreamUrl(track.path);
+        } else {
+          // If no authentication, check if track has a cached URL
+          if (track.url) {
+            streamUrl = track.url;
+          } else {
+            throw new Error('No stream URL available and not authenticated');
+          }
+        }
+        
         if (audioRef.current) {
+          console.log('Setting audio source:', streamUrl);
           audioRef.current.src = streamUrl;
           audioRef.current.preload = 'metadata'; // Force metadata loading
           audioRef.current.load();
@@ -50,14 +76,14 @@ export const useAudioPlayer = () => {
               console.log('Early duration detection:', audioRef.current.duration);
               updateState({ duration: audioRef.current.duration });
             }
-          }, 50);
+          }, 100);
         }
       }
     } catch (error) {
       console.error('Failed to load track:', error);
       updateState({ isPlaying: false });
     }
-  }, [updateState]);
+  }, [updateState, user]);
 
   const play = useCallback(() => {
     if (audioRef.current && audioRef.current.readyState >= 3) {
@@ -154,6 +180,7 @@ export const useAudioPlayer = () => {
 
     const handleTimeUpdate = () => {
       if (audio && !isNaN(audio.currentTime)) {
+        console.log('Time update:', audio.currentTime, 'Duration:', audio.duration);
         updateState({ currentTime: audio.currentTime });
       }
     };
@@ -210,6 +237,7 @@ export const useAudioPlayer = () => {
             updates.duration = audio.duration;
           }
           
+          console.log('Interval update:', updates);
           updateState(updates);
         }
       }, 100); // Update every 100ms for smooth progress
