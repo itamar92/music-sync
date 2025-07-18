@@ -41,6 +41,7 @@ export interface TrackEntity {
   playlistId?: string;
   streamUrl?: string;
   streamUrlExpiresAt?: Date;
+  sharedUrl?: string; // Permanent shared link (doesn't expire)
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -87,6 +88,8 @@ export interface DatabaseService {
   saveCachedTracks(userId: string, folderId: string, tracks: Track[]): Promise<TrackEntity[]>;
   updateTrackStreamUrl(userId: string, trackId: string, streamUrl: string): Promise<void>;
   getTrackStreamUrl(userId: string, trackId: string): Promise<string | null>;
+  updateTrackSharedUrl(userId: string, trackId: string, sharedUrl: string): Promise<void>;
+  getTrackSharedUrl(userId: string, trackId: string): Promise<string | null>;
   invalidateExpiredStreamUrls(): Promise<void>;
   cleanupInactiveTracks(): Promise<void>;
 }
@@ -311,6 +314,35 @@ class DatabaseServiceImpl implements DatabaseService {
       return streamUrl;
     } catch (error) {
       console.error('Error getting track stream URL:', error);
+      return null;
+    }
+  }
+
+  async updateTrackSharedUrl(userId: string, trackId: string, sharedUrl: string): Promise<void> {
+    try {
+      const trackRef = doc(db, 'tracks', trackId);
+      
+      await updateDoc(trackRef, {
+        sharedUrl,
+        updatedAt: Timestamp.fromDate(new Date())
+      });
+    } catch (error) {
+      console.error('Error updating track shared URL:', error);
+      throw error;
+    }
+  }
+
+  async getTrackSharedUrl(userId: string, trackId: string): Promise<string | null> {
+    try {
+      const trackDoc = await getDoc(doc(db, 'tracks', trackId));
+      if (!trackDoc.exists()) {
+        return null;
+      }
+      
+      const data = trackDoc.data();
+      return data.sharedUrl || null;
+    } catch (error) {
+      console.error('Error getting track shared URL:', error);
       return null;
     }
   }

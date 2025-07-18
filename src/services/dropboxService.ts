@@ -644,6 +644,101 @@ class DropboxService {
     }
   }
 
+  async getFileSharedLink(filePath: string): Promise<string> {
+    if (this.useServerApi) {
+      // TODO: Add server API support for shared links if needed
+      return await apiService.getFileStreamUrl(filePath);
+    }
+
+    if (!this.dbx) {
+      throw new Error('Not authenticated');
+    }
+
+    try {
+      console.log('Attempting to create/get shared link for:', filePath);
+      
+      // First, try to get existing shared links for this file
+      try {
+        const existingLinksResponse = await this.dbx.sharingListSharedLinks({
+          path: filePath,
+          direct_only: true
+        });
+
+        // If a shared link already exists, return it
+        if (existingLinksResponse.result.links.length > 0) {
+          const sharedLink = existingLinksResponse.result.links[0];
+          console.log('Found existing shared link:', sharedLink.url);
+          // Convert Dropbox share URL to direct download URL
+          return this.convertToDirectLink(sharedLink.url);
+        }
+      } catch (listError) {
+        console.warn('Could not list existing shared links, trying to create new one:', listError);
+      }
+
+      // Try a different approach - check if we can create shared links without settings
+      try {
+        console.log('Attempting simple shared link creation...');
+        const simpleResponse = await this.dbx.sharingCreateSharedLink({
+          path: filePath
+        });
+        
+        console.log('Created simple shared link:', simpleResponse.result.url);
+        return this.convertToDirectLink(simpleResponse.result.url);
+      } catch (simpleError) {
+        console.warn('Simple shared link creation failed:', simpleError);
+        
+        // Check if the error is because a link already exists
+        if (simpleError.error && simpleError.error['.tag'] === 'shared_link_already_exists') {
+          console.log('Shared link already exists, trying to retrieve it...');
+          try {
+            // Try to get the existing link
+            const existingResponse = await this.dbx.sharingListSharedLinks({
+              path: filePath
+            });
+            
+            if (existingResponse.result.links.length > 0) {
+              const existingLink = existingResponse.result.links[0];
+              console.log('Retrieved existing shared link:', existingLink.url);
+              return this.convertToDirectLink(existingLink.url);
+            }
+          } catch (retrieveError) {
+            console.warn('Failed to retrieve existing shared link:', retrieveError);
+          }
+        }
+        
+        // Final fallback to temporary URL (but warn user)
+        console.warn('⚠️ Using temporary URL - will expire in 4 hours!');
+        return await this.getFileStreamUrl(filePath);
+      }
+    } catch (error) {
+      console.error('Failed to get shared link, falling back to temporary stream URL:', error);
+      return await this.getFileStreamUrl(filePath);
+    }
+  }
+
+  private convertToDirectLink(dropboxShareUrl: string): string {
+    console.log('Converting to direct link:', dropboxShareUrl);
+    
+    // Method 1: Convert dropbox.com to dl.dropboxusercontent.com
+    if (dropboxShareUrl.includes('dropbox.com/s/')) {
+      const directUrl = dropboxShareUrl
+        .replace('www.dropbox.com', 'dl.dropboxusercontent.com')
+        .replace('dropbox.com', 'dl.dropboxusercontent.com')
+        .replace('/s/', '/s/raw/')
+        .split('?')[0];
+      console.log('Method 1 - Direct URL:', directUrl);
+      return directUrl;
+    }
+    
+    // Method 2: Add ?dl=1 parameter for direct download
+    const directDownloadUrl = dropboxShareUrl.includes('?') 
+      ? dropboxShareUrl.replace('?dl=0', '?dl=1').replace(/&dl=0/, '&dl=1')
+      : dropboxShareUrl + '?dl=1';
+    
+    console.log('Method 2 - Direct download URL:', directDownloadUrl);
+    return directDownloadUrl;
+  }
+
   async downloadFile(filePath: string): Promise<Blob> {
     if (!this.dbx) {
       throw new Error('Not authenticated');
