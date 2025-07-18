@@ -12,6 +12,14 @@ export class CachedTrackService {
    */
   async getTracksFromFolder(userId: string, folderId: string, folderPath: string): Promise<Track[]> {
     try {
+      // Only try database operations if user is properly authenticated
+      if (!userId) {
+        console.log('No userId provided, skipping database cache');
+        return await this.fetchFromDropboxFallback(folderPath);
+      }
+
+      console.log(`Attempting to get cached tracks for userId: ${userId}, folderId: ${folderId}`);
+
       // First, try to get from database cache
       const cachedTracks = await databaseService.getCachedTracks(userId, folderId);
       
@@ -26,8 +34,8 @@ export class CachedTrackService {
           durationSeconds: track.durationSeconds || 0,
           path: track.filePath,
           folderId: track.folderId,
-          // Add url field for playback - will be populated when needed
-          url: track.streamUrl || undefined
+          // Prefer shared URL over stream URL (shared URLs don't expire)
+          url: track.sharedUrl || track.streamUrl || undefined
         }));
         
         // Load durations for tracks that don't have them (only if we have proper permissions)
@@ -86,37 +94,78 @@ export class CachedTrackService {
 
   /**
    * Get stream URL with caching
-   * 1. Try to get cached URL from database
-   * 2. If not found or expired, fetch from Dropbox
-   * 3. Save to database for future use
+   * 1. Try to get permanent shared URL from database
+   * 2. Try to get temporary stream URL from database
+   * 3. If not found or expired, create/fetch from Dropbox
+   * 4. Save to database for future use
    */
   async getStreamUrl(userId: string, trackId: string, trackPath: string): Promise<string> {
     try {
-      // First, try to get from database cache
-      const cachedUrl = await databaseService.getTrackStreamUrl(userId, trackId);
-      
-      if (cachedUrl) {
-        console.log(`Using cached stream URL for track ${trackId}`);
-        return cachedUrl;
+      // Only try database operations if user is properly authenticated
+      if (userId && trackId) {
+        // First, try to get permanent shared URL from database cache
+        try {
+          const cachedSharedUrl = await databaseService.getTrackSharedUrl(userId, trackId);
+          
+          if (cachedSharedUrl) {
+            console.log(`Using cached shared URL for track ${trackId}`);
+            return cachedSharedUrl;
+          }
+        } catch (error) {
+          console.warn('Failed to get cached shared URL:', error);
+        }
+        
+        // Second, try to get temporary stream URL from database cache
+        try {
+          const cachedStreamUrl = await databaseService.getTrackStreamUrl(userId, trackId);
+          
+          if (cachedStreamUrl) {
+            console.log(`Using cached stream URL for track ${trackId}`);
+            return cachedStreamUrl;
+          }
+        } catch (error) {
+          console.warn('Failed to get cached stream URL:', error);
+        }
       }
       
-      // If no cache or expired, fetch from Dropbox
-      console.log(`No cached stream URL for track ${trackPath}, fetching from Dropbox...`);
-      const streamUrl = await dropboxService.getFileStreamUrl(trackPath);
+      // If no cache, try to create permanent shared link first
+      console.log(`No cached URL for track ${trackPath}, creating shared link...`);
       
-      // Try to save to database cache, but don't fail if permissions are insufficient
       try {
-        await databaseService.updateTrackStreamUrl(userId, trackId, streamUrl);
-      } catch (dbError) {
-        console.warn('Failed to cache stream URL in database:', dbError);
-        // Continue without caching - the stream URL is still valid
+        const sharedUrl = await dropboxService.getFileSharedLink(trackPath);
+        
+        // Try to save shared URL to database cache
+        try {
+          await databaseService.updateTrackSharedUrl(userId, trackId, sharedUrl);
+          console.log(`Cached shared URL for track ${trackId}`);
+        } catch (dbError) {
+          console.warn('Failed to cache shared URL in database:', dbError);
+        }
+        
+        return sharedUrl;
+      } catch (sharedLinkError) {
+        console.warn('Failed to create shared link, falling back to temporary stream URL:', sharedLinkError);
+        
+        // Fallback to temporary stream URL
+        const streamUrl = await dropboxService.getFileStreamUrl(trackPath);
+        
+        // Try to save temporary URL to database cache
+        try {
+          if (userId && trackId) {
+            await databaseService.updateTrackStreamUrl(userId, trackId, streamUrl);
+          }
+        } catch (dbError) {
+          console.warn('Failed to cache stream URL in database:', dbError);
+        }
+        
+        // Warn about expiration
+        console.warn(`⚠️ Using temporary URL for ${trackPath} - will expire in 4 hours`);
+        return streamUrl;
       }
-      
-      return streamUrl;
       
     } catch (error) {
       console.error('Error getting stream URL:', error);
-      // Fallback to direct Dropbox call
+      // Final fallback to direct Dropbox call
       if (dropboxService.isAuthenticated()) {
         return await dropboxService.getFileStreamUrl(trackPath);
       }
@@ -273,6 +322,40 @@ export class CachedTrackService {
       console.log('Cleaned up expired stream URLs and inactive tracks');
     } catch (error) {
       console.error('Error cleaning up expired URLs:', error);
+    }
+  }
+
+  /**
+   * Refresh a specific track's URL if it's expired or about to expire
+   */
+  async refreshTrackUrl(userId: string, trackId: string, trackPath: string): Promise<string> {
+    console.log(`Refreshing URL for track ${trackId}`);
+    
+    // Clear any cached URLs for this track
+    try {
+      if (userId && trackId) {
+        await databaseService.updateTrackStreamUrl(userId, trackId, '');
+        await databaseService.updateTrackSharedUrl(userId, trackId, '');
+      }
+    } catch (error) {
+      console.warn('Failed to clear cached URLs:', error);
+    }
+    
+    // Get fresh URL
+    return await this.getStreamUrl(userId, trackId, trackPath);
+  }
+
+  /**
+   * Check if URLs are about to expire and refresh them
+   */
+  async refreshExpiringUrls(): Promise<void> {
+    console.log('Checking for expiring URLs...');
+    // This would require a database query to find URLs expiring in the next hour
+    // For now, we'll just invalidate expired ones
+    try {
+      await this.cleanupExpiredUrls();
+    } catch (error) {
+      console.error('Error refreshing expiring URLs:', error);
     }
   }
 }
