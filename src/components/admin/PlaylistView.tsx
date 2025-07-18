@@ -4,6 +4,7 @@ import { doc, updateDoc, collection, query, where, getDocs } from 'firebase/fire
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { db, auth } from '../../services/firebase';
 import { dropboxService } from '../../services/dropboxService';
+import { cachedTrackService } from '../../services/cachedTrackService';
 import { Track } from '../../types';
 import { generatePlaylistCover } from '../../utils/generateCover';
 
@@ -38,10 +39,6 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
     setLoadingTracks(true);
     
     try {
-      if (!dropboxService.isAuthenticated()) {
-        throw new Error('Please connect to Dropbox first');
-      }
-      
       if (!playlist.folderIds || playlist.folderIds.length === 0) {
         setPlaylistTracks([]);
         return;
@@ -61,7 +58,17 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
           }
 
           const folderData = folderSnapshot.docs[0].data();
-          return await dropboxService.getTracksFromFolder(folderData.dropboxPath);
+          // Use cached track service instead of direct Dropbox call
+          if (user) {
+            return await cachedTrackService.getTracksFromFolder(user.uid, folderId, folderData.dropboxPath);
+          } else {
+            // Fallback to direct Dropbox call for non-authenticated users
+            if (!dropboxService.isAuthenticated()) {
+              console.warn('Dropbox not authenticated and no user logged in');
+              return [];
+            }
+            return await dropboxService.getTracksFromFolder(folderData.dropboxPath);
+          }
         } catch (error) {
           console.error(`Error loading tracks from folder ${folderId}:`, error);
           return [];
@@ -103,9 +110,17 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
       }
       
       setPlaylistTracks(allTracks);
+      
+      // Only show error if no tracks were loaded at all
+      if (allTracks.length === 0 && !dropboxService.isAuthenticated() && !user) {
+        console.warn('No cached tracks available and Dropbox not connected');
+      }
     } catch (error) {
       console.error('Error loading playlist tracks:', error);
-      alert('Failed to load playlist contents. Please try again.');
+      // Only show alert if no tracks were loaded
+      if (playlistTracks.length === 0) {
+        alert('Failed to load playlist contents. Please try again or connect to Dropbox.');
+      }
     } finally {
       setLoadingTracks(false);
     }
@@ -117,7 +132,10 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
       if (event.detail?.tracks) {
         setPlaylistTracks(prev => {
           const trackMap = new Map(event.detail.tracks.map((t: Track) => [t.id, t]));
-          return prev.map(track => trackMap.get(track.id) || track);
+          return prev.map(track => {
+            const updatedTrack = trackMap.get(track.id);
+            return updatedTrack || track;
+          });
         });
       }
     };

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Play, Edit3, Save, X, GripVertical, Pause, Trash2 } from 'lucide-react';
+import { ArrowLeft, Play, Edit3, Save, X, GripVertical, Pause, Trash2, RefreshCw } from 'lucide-react';
 import { doc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { db, auth } from '../../services/firebase';
 import { dropboxService } from '../../services/dropboxService';
+import { cachedTrackService } from '../../services/cachedTrackService';
 import { Track } from '../../types';
 import { generatePlaylistCover } from '../../utils/generateCover';
 
@@ -31,6 +32,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
   const [editingTrackName, setEditingTrackName] = useState('');
   const [draggedTrack, setDraggedTrack] = useState<number | null>(null);
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     loadPlaylistTracks();
@@ -40,16 +42,12 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
     setLoadingTracks(true);
     
     try {
-      if (!dropboxService.isAuthenticated()) {
-        throw new Error('Please connect to Dropbox first');
-      }
-      
       if (!playlist.folderIds || playlist.folderIds.length === 0) {
         setPlaylistTracks([]);
         return;
       }
 
-      // Load tracks from all folders in parallel
+      // Load tracks from all folders in parallel using cached service
       const trackPromises = playlist.folderIds.map(async (folderId: string) => {
         try {
           // Get folder details first
@@ -63,7 +61,18 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
           }
 
           const folderData = folderSnapshot.docs[0].data();
-          return await dropboxService.getTracksFromFolder(folderData.dropboxPath);
+          
+          // Use cached track service instead of direct Dropbox call
+          if (user) {
+            return await cachedTrackService.getTracksFromFolder(user.uid, folderId, folderData.dropboxPath);
+          } else {
+            // Fallback to direct Dropbox call for non-authenticated users
+            if (!dropboxService.isAuthenticated()) {
+              console.warn('Dropbox not authenticated and no user logged in');
+              return [];
+            }
+            return await dropboxService.getTracksFromFolder(folderData.dropboxPath);
+          }
         } catch (error) {
           console.error(`Error loading tracks from folder ${folderId}:`, error);
           return [];
@@ -105,11 +114,74 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
       }
       
       setPlaylistTracks(allTracks);
+      
+      // Only show error if no tracks were loaded at all
+      if (allTracks.length === 0 && !dropboxService.isAuthenticated() && !user) {
+        console.warn('No cached tracks available and Dropbox not connected');
+      }
     } catch (error) {
       console.error('Error loading playlist tracks:', error);
-      alert('Failed to load playlist contents. Please try again.');
+      // Only show alert if no tracks were loaded
+      if (playlistTracks.length === 0) {
+        alert('Failed to load playlist contents. Please try again or connect to Dropbox.');
+      }
     } finally {
       setLoadingTracks(false);
+    }
+  };
+
+  const handleRefreshCache = async () => {
+    if (!user || !playlist.folderIds || playlist.folderIds.length === 0) return;
+    
+    setIsRefreshing(true);
+    try {
+      // Refresh cache for all folders in the playlist
+      const refreshPromises = playlist.folderIds.map(async (folderId: string) => {
+        try {
+          // Get folder details first
+          const foldersRef = collection(db, 'folderSyncs');
+          const folderQuery = query(foldersRef, where('__name__', '==', folderId));
+          const folderSnapshot = await getDocs(folderQuery);
+          
+          if (folderSnapshot.empty) {
+            console.warn(`Folder ${folderId} not found`);
+            return [];
+          }
+
+          const folderData = folderSnapshot.docs[0].data();
+          return await cachedTrackService.refreshFolderCache(user.uid, folderId, folderData.dropboxPath);
+        } catch (error) {
+          console.error(`Error refreshing cache for folder ${folderId}:`, error);
+          return [];
+        }
+      });
+
+      const refreshedTrackArrays = await Promise.all(refreshPromises);
+      let allTracks = refreshedTrackArrays.flat();
+      
+      // Apply saved track order if exists
+      if (playlist.trackOrder) {
+        const orderedTracks = [];
+        const trackMap = new Map(allTracks.map(track => [track.id, track]));
+        
+        for (const trackId of playlist.trackOrder) {
+          if (trackMap.has(trackId)) {
+            orderedTracks.push(trackMap.get(trackId)!);
+            trackMap.delete(trackId);
+          }
+        }
+        
+        // Add any remaining tracks that weren't in the order
+        orderedTracks.push(...Array.from(trackMap.values()));
+        allTracks = orderedTracks;
+      }
+      
+      setPlaylistTracks(allTracks);
+      console.log(`Cache refreshed: ${allTracks.length} tracks loaded`);
+    } catch (error) {
+      console.error('Error refreshing cache:', error);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -119,7 +191,10 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
       if (event.detail?.tracks) {
         setPlaylistTracks(prev => {
           const trackMap = new Map(event.detail.tracks.map((t: Track) => [t.id, t]));
-          return prev.map(track => trackMap.get(track.id) || track);
+          return prev.map(track => {
+            const updatedTrack = trackMap.get(track.id);
+            return updatedTrack || track;
+          });
         });
       }
     };
@@ -369,6 +444,19 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
             <span>Back</span>
           </button>
         </div>
+        
+        {/* Refresh Cache Button */}
+        {!isReadOnly && user && (
+          <button
+            onClick={handleRefreshCache}
+            disabled={isRefreshing || loadingTracks}
+            className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg transition-colors"
+            title="Refresh cache from Dropbox"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>{isRefreshing ? 'Syncing...' : 'Sync'}</span>
+          </button>
+        )}
       </div>
 
       {/* Playlist Header */}

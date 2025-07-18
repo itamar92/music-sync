@@ -1,6 +1,6 @@
 // src/services/databaseService.ts
 import { db } from './firebase';
-import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, query, where, writeBatch, Timestamp } from 'firebase/firestore';
 import { Track, Playlist, Folder } from '../types';
 
 // Database entity interfaces
@@ -39,6 +39,8 @@ export interface TrackEntity {
   filePath: string;
   folderId: string;
   playlistId?: string;
+  streamUrl?: string;
+  streamUrlExpiresAt?: Date;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -79,6 +81,14 @@ export interface DatabaseService {
   syncPlaylistTracks(userId: string, playlistId: string, tracks: Track[]): Promise<TrackEntity[]>;
   getLastSyncTime(userId: string, folderId: string): Promise<Date | null>;
   updateLastSyncTime(userId: string, folderId: string): Promise<void>;
+  
+  // Track caching methods
+  getCachedTracks(userId: string, folderId: string): Promise<TrackEntity[]>;
+  saveCachedTracks(userId: string, folderId: string, tracks: Track[]): Promise<TrackEntity[]>;
+  updateTrackStreamUrl(userId: string, trackId: string, streamUrl: string): Promise<void>;
+  getTrackStreamUrl(userId: string, trackId: string): Promise<string | null>;
+  invalidateExpiredStreamUrls(): Promise<void>;
+  cleanupInactiveTracks(): Promise<void>;
 }
 
 // Firebase implementation of the database service
@@ -185,6 +195,173 @@ class DatabaseServiceImpl implements DatabaseService {
 
   async updateLastSyncTime(userId: string, folderId: string): Promise<void> {
     throw new Error('Database service not implemented yet');
+  }
+
+  // Track caching implementations
+  async getCachedTracks(userId: string, folderId: string): Promise<TrackEntity[]> {
+    try {
+      const tracksQuery = query(
+        collection(db, 'tracks'),
+        where('userId', '==', userId),
+        where('folderId', '==', folderId),
+        where('isActive', '==', true)
+      );
+      
+      const querySnapshot = await getDocs(tracksQuery);
+      return querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+        updatedAt: doc.data().updatedAt?.toDate() || new Date(),
+        streamUrlExpiresAt: doc.data().streamUrlExpiresAt?.toDate()
+      })) as TrackEntity[];
+    } catch (error) {
+      console.error('Error getting cached tracks:', error);
+      return [];
+    }
+  }
+
+  async saveCachedTracks(userId: string, folderId: string, tracks: Track[]): Promise<TrackEntity[]> {
+    try {
+      const batch = writeBatch(db);
+      const savedTracks: TrackEntity[] = [];
+      
+      // First, get existing tracks for this folder and mark them as inactive
+      const existingTracksQuery = query(
+        collection(db, 'tracks'),
+        where('userId', '==', userId),
+        where('folderId', '==', folderId)
+      );
+      const existingSnapshot = await getDocs(existingTracksQuery);
+      
+      // Mark existing tracks as inactive
+      existingSnapshot.docs.forEach(doc => {
+        batch.update(doc.ref, { isActive: false });
+      });
+      
+      // Add new tracks
+      for (const track of tracks) {
+        const trackRef = doc(collection(db, 'tracks'));
+        const trackEntity: Omit<TrackEntity, 'id'> = {
+          userId,
+          name: track.name,
+          artist: track.artist,
+          duration: track.duration,
+          durationSeconds: track.durationSeconds || 0,
+          filePath: track.path || '',
+          folderId,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        
+        batch.set(trackRef, {
+          ...trackEntity,
+          createdAt: Timestamp.fromDate(trackEntity.createdAt),
+          updatedAt: Timestamp.fromDate(trackEntity.updatedAt)
+        });
+        
+        savedTracks.push({
+          id: trackRef.id,
+          ...trackEntity
+        });
+      }
+      
+      await batch.commit();
+      return savedTracks;
+    } catch (error) {
+      console.error('Error saving cached tracks:', error);
+      throw error;
+    }
+  }
+
+  async updateTrackStreamUrl(userId: string, trackId: string, streamUrl: string): Promise<void> {
+    try {
+      const trackRef = doc(db, 'tracks', trackId);
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 4); // Dropbox URLs expire after 4 hours
+      
+      await updateDoc(trackRef, {
+        streamUrl,
+        streamUrlExpiresAt: Timestamp.fromDate(expiresAt),
+        updatedAt: Timestamp.fromDate(new Date())
+      });
+    } catch (error) {
+      console.error('Error updating track stream URL:', error);
+      throw error;
+    }
+  }
+
+  async getTrackStreamUrl(userId: string, trackId: string): Promise<string | null> {
+    try {
+      const trackDoc = await getDoc(doc(db, 'tracks', trackId));
+      if (!trackDoc.exists()) {
+        return null;
+      }
+      
+      const data = trackDoc.data();
+      const streamUrl = data.streamUrl;
+      const expiresAt = data.streamUrlExpiresAt?.toDate();
+      
+      // Check if URL is expired
+      if (!streamUrl || !expiresAt || new Date() > expiresAt) {
+        return null;
+      }
+      
+      return streamUrl;
+    } catch (error) {
+      console.error('Error getting track stream URL:', error);
+      return null;
+    }
+  }
+
+  async invalidateExpiredStreamUrls(): Promise<void> {
+    try {
+      const expiredQuery = query(
+        collection(db, 'tracks'),
+        where('streamUrlExpiresAt', '<', Timestamp.now())
+      );
+      
+      const snapshot = await getDocs(expiredQuery);
+      const batch = writeBatch(db);
+      
+      snapshot.docs.forEach(doc => {
+        batch.update(doc.ref, {
+          streamUrl: null,
+          streamUrlExpiresAt: null
+        });
+      });
+      
+      await batch.commit();
+    } catch (error) {
+      console.error('Error invalidating expired stream URLs:', error);
+    }
+  }
+
+  async cleanupInactiveTracks(): Promise<void> {
+    try {
+      // Delete tracks that have been inactive for more than 24 hours
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      const inactiveQuery = query(
+        collection(db, 'tracks'),
+        where('isActive', '==', false),
+        where('updatedAt', '<', Timestamp.fromDate(yesterday))
+      );
+      
+      const snapshot = await getDocs(inactiveQuery);
+      const batch = writeBatch(db);
+      
+      snapshot.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+      
+      await batch.commit();
+      console.log(`Cleaned up ${snapshot.size} inactive tracks`);
+    } catch (error) {
+      console.error('Error cleaning up inactive tracks:', error);
+    }
   }
 }
 

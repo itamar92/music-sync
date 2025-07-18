@@ -93,3 +93,12 @@ export interface DropboxFile {
   server_modified: string;
   is_folder: boolean;
 }
+
+export interface AudioPlayerState {
+  currentTrack: Track | null;
+  currentTrackIndex: number;
+  isPlaying: boolean;
+  currentTime: number;
+  duration: number;
+  volume: number;
+}

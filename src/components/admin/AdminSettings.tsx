@@ -4,7 +4,7 @@ import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { db, auth } from '../../services/firebase';
 import { migrateCollectionsToPublic, migratePlaylistsToPublic } from '../../utils/migratePublicData';
-import { debugCollectionsAndPlaylists } from '../../utils/debugDatabase';
+import { debugCollectionsAndPlaylists, debugDatabase } from '../../utils/debugDatabase';
 import { useToast } from '../../hooks/useToast';
 import { ToastContainer } from '../ToastContainer';
 
@@ -86,6 +86,7 @@ export const AdminSettings: React.FC = () => {
 
     info('Debugging database state...');
     await debugCollectionsAndPlaylists(user.uid);
+    await debugDatabase(user.uid);
     info('Check console for debug information.');
   };
 
