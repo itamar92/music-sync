@@ -1,6 +1,10 @@
 import { Dropbox, DropboxAuth, files } from 'dropbox';
 import { Track, Folder } from '../types';
 import { apiService } from './apiService';
+import { tokenManager } from './tokenManager';
+import { PKCEUtils } from '../utils/pkce';
+import { KeyRotationService } from './keyRotation';
+import { AuthSecurity } from '../utils/authSecurity';
 
 class DropboxService {
   private dbx: Dropbox | null = null;
@@ -16,36 +20,103 @@ class DropboxService {
 
   constructor() {
     this.initializeAuth();
+    this.initializeSecurity();
   }
 
-  private initializeAuth() {
+  private async initializeAuth() {
     const clientId = import.meta.env.VITE_DROPBOX_APP_KEY;
-    console.log('Dropbox Init: App Key found:', clientId ? 'YES' : 'NO');
-    console.log('Dropbox Init: App Key value:', clientId);
+    console.log('🔧 Dropbox Init: App Key found:', clientId ? 'YES' : 'NO');
     
     if (!clientId) {
-      console.error('Dropbox Init: App Key not found in environment variables');
-      console.error('Dropbox Init: Make sure VITE_DROPBOX_APP_KEY is set in your .env.local file');
+      console.error('❌ Dropbox Init: App Key not found in environment variables');
+      console.error('❌ Dropbox Init: Make sure VITE_DROPBOX_APP_KEY is set in your .env.local file');
       return;
     }
 
     try {
-      console.log('Dropbox Init: Creating DropboxAuth instance...');
+      console.log('🔧 Dropbox Init: Creating DropboxAuth instance...');
       this.dbxAuth = new DropboxAuth({
         clientId,
         fetch: fetch.bind(window)
       });
-      console.log('Dropbox Init: DropboxAuth created successfully');
+      console.log('✅ Dropbox Init: DropboxAuth created successfully');
 
-      const token = localStorage.getItem('dropbox_access_token');
-      if (token) {
-        console.log('Dropbox Init: Found existing access token, attempting to use it');
-        this.setAccessToken(token);
+      // Try to get valid access token using TokenManager
+      console.log('🔍 Dropbox Init: Checking for valid stored tokens...');
+      const validToken = await tokenManager.getValidAccessToken();
+      
+      if (validToken) {
+        console.log('✅ Dropbox Init: Found valid access token, initializing service');
+        this.setAccessToken(validToken);
       } else {
-        console.log('Dropbox Init: No existing access token found - user needs to authenticate');
+        console.log('📋 Dropbox Init: No valid token found - user needs to authenticate');
+        
+        // Check for legacy token and migrate if valid
+        await this.migrateLegacyToken();
       }
     } catch (error) {
-      console.error('Dropbox Init: Failed to initialize DropboxAuth:', error);
+      console.error('❌ Dropbox Init: Failed to initialize authentication:', error);
+    }
+  }
+
+  /**
+   * Migrate legacy localStorage token to new TokenManager system
+   */
+  private async migrateLegacyToken() {
+    try {
+      const legacyToken = localStorage.getItem('dropbox_access_token');
+      if (legacyToken) {
+        console.log('🔄 Found legacy token, attempting migration...');
+        
+        // Test if legacy token is still valid
+        const testDbx = new Dropbox({
+          accessToken: legacyToken,
+          fetch: fetch.bind(window)
+        });
+        
+        try {
+          await testDbx.usersGetCurrentAccount();
+          console.log('⚠️ Legacy token is valid but missing refresh capability');
+          console.log('⚠️ User will need to re-authenticate for refresh token support');
+          
+          // Use legacy token temporarily but prompt for re-auth
+          this.setAccessToken(legacyToken);
+          
+          // Clear legacy token to force proper OAuth flow next time
+          localStorage.removeItem('dropbox_access_token');
+          
+        } catch (error) {
+          console.log('🗑️ Legacy token is invalid, clearing...');
+          localStorage.removeItem('dropbox_access_token');
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Legacy token migration failed:', error);
+    }
+  }
+
+  /**
+   * Initialize security monitoring and key rotation
+   */
+  private async initializeSecurity() {
+    try {
+      console.log('🔒 Initializing security systems...');
+      
+      // Start security monitoring
+      AuthSecurity.startSecurityMonitoring();
+      
+      // Schedule automatic key rotation
+      KeyRotationService.scheduleRotation();
+      
+      // Perform automatic legacy migration
+      await KeyRotationService.migrateLegacyTokens();
+      
+      // Check for required key rotation
+      await KeyRotationService.performAutoRotation();
+      
+      console.log('✅ Security systems initialized');
+    } catch (error) {
+      console.error('❌ Security initialization failed:', error);
     }
   }
 
@@ -56,18 +127,75 @@ class DropboxService {
 
     try {
       const redirectUri = window.location.origin;
-      // Use implicit grant flow to get access token directly
-      const authUrl = await this.dbxAuth.getAuthenticationUrl(redirectUri, undefined, 'token');
       
-      if (redirect) {
-        window.location.href = authUrl as string;
-        return true;
+      // Check if PKCE is supported for secure authentication
+      if (PKCEUtils.isPKCESupported()) {
+        console.log('🔐 Starting secure OAuth flow with PKCE...');
+        return await this.authenticateWithPKCE(redirectUri, redirect);
       } else {
-        return authUrl as string;
+        console.warn('⚠️ PKCE not supported, falling back to standard OAuth');
+        return await this.authenticateStandard(redirectUri, redirect);
       }
     } catch (error) {
-      console.error('Authentication failed:', error);
+      console.error('❌ Authentication failed:', error);
       return false;
+    }
+  }
+
+  /**
+   * Authenticate using PKCE (most secure, no client secret needed)
+   */
+  private async authenticateWithPKCE(redirectUri: string, redirect: boolean): Promise<string | boolean> {
+    try {
+      // Generate PKCE pair
+      const pkcePair = await PKCEUtils.generatePKCEPair();
+      
+      // Store code verifier securely for later use
+      PKCEUtils.storePKCEVerifier(pkcePair.codeVerifier);
+      
+      // Build OAuth URL with PKCE parameters
+      const clientId = import.meta.env.VITE_DROPBOX_APP_KEY;
+      const authUrl = new URL('https://www.dropbox.com/oauth2/authorize');
+      
+      authUrl.searchParams.set('client_id', clientId);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('token_access_type', 'offline'); // For refresh tokens
+      authUrl.searchParams.set('code_challenge', pkcePair.codeChallenge);
+      authUrl.searchParams.set('code_challenge_method', 'S256');
+      
+      const finalUrl = authUrl.toString();
+      
+      if (redirect) {
+        console.log('🌐 Redirecting to Dropbox for PKCE authentication...');
+        window.location.href = finalUrl;
+        return true;
+      } else {
+        return finalUrl;
+      }
+    } catch (error) {
+      console.error('❌ PKCE authentication setup failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Standard OAuth authentication (requires client secret or server-side handling)
+   */
+  private async authenticateStandard(redirectUri: string, redirect: boolean): Promise<string | boolean> {
+    const authUrl = await this.dbxAuth!.getAuthenticationUrl(
+      redirectUri, 
+      undefined, 
+      'code', // Use 'code' instead of 'token' for refresh token support
+      'offline' // Request offline access for refresh tokens
+    );
+    
+    if (redirect) {
+      console.log('🌐 Redirecting to Dropbox for standard authentication...');
+      window.location.href = authUrl as string;
+      return true;
+    } else {
+      return authUrl as string;
     }
   }
 
@@ -77,18 +205,38 @@ class DropboxService {
     }
 
     try {
+      console.log('🔄 Processing OAuth callback with authorization code...');
       const redirectUri = window.location.origin;
-      await this.dbxAuth.getAccessTokenFromCode(redirectUri, code);
-      const token = this.dbxAuth.getAccessToken();
       
-      if (token) {
-        this.setAccessToken(token);
-        localStorage.setItem('dropbox_access_token', token);
+      // Retrieve PKCE code verifier if it was stored
+      const codeVerifier = PKCEUtils.retrievePKCEVerifier();
+      
+      if (codeVerifier) {
+        console.log('🔐 Using PKCE for secure token exchange');
+      } else {
+        console.log('⚠️ No PKCE verifier found, using standard exchange');
+      }
+      
+      // Exchange authorization code for tokens using TokenManager
+      const tokenData = await tokenManager.exchangeCodeForTokens(code, redirectUri, codeVerifier || undefined);
+      
+      if (tokenData.accessToken) {
+        console.log('✅ OAuth callback successful, tokens obtained');
+        this.setAccessToken(tokenData.accessToken);
+        
+        // Clear any legacy tokens and PKCE data
+        localStorage.removeItem('dropbox_access_token');
+        PKCEUtils.clearPKCEData();
+        
         return true;
       }
+      
+      console.error('❌ OAuth callback failed - no access token received');
       return false;
     } catch (error) {
-      console.error('Auth callback failed:', error);
+      console.error('❌ Auth callback failed:', error);
+      // Clean up PKCE data on error
+      PKCEUtils.clearPKCEData();
       return false;
     }
   }
@@ -190,11 +338,27 @@ class DropboxService {
       if (error.status === 429 && retries > 0) {
         // Rate limited - wait and retry
         const retryAfter = error.headers?.['retry-after'] ? parseInt(error.headers['retry-after']) * 1000 : 2000;
+        console.log(`⏳ Rate limited, waiting ${retryAfter}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, retryAfter));
         return this.retryRequest(requestFn, retries - 1);
-      } else if (error.status === 401) {
-        // Authentication failed - clear token and throw specific error
-        console.error('Authentication failed (401) - token may be expired or invalid');
+      } else if (error.status === 401 && retries > 0) {
+        // Authentication failed - try to refresh token
+        console.log('🔄 Authentication failed, attempting token refresh...');
+        
+        try {
+          const validToken = await tokenManager.getValidAccessToken();
+          if (validToken && validToken !== this.accessToken) {
+            console.log('✅ Token refreshed, retrying request...');
+            this.setAccessToken(validToken);
+            return this.retryRequest(requestFn, retries - 1);
+          }
+        } catch (refreshError) {
+          console.error('❌ Token refresh failed:', refreshError);
+        }
+        
+        // If refresh failed or no new token, disconnect and throw
+        console.error('❌ Authentication failed and refresh unsuccessful');
+        await tokenManager.clearStoredTokens();
         this.disconnect();
         throw new Error('Authentication failed. Please reconnect to Dropbox.');
       }
@@ -214,27 +378,44 @@ class DropboxService {
       try {
         return await apiService.checkStatus().then(status => status.isInitialized && status.hasToken);
       } catch (error) {
-        console.warn('Server validation failed:', error);
+        console.warn('⚠️ Server validation failed:', error);
         return false;
       }
     }
 
-    if (!this.dbx || !this.accessToken) {
-      return false;
-    }
-
+    // Try to get a valid access token (will refresh if needed)
     try {
+      console.log('🔍 Validating token...');
+      const validToken = await tokenManager.getValidAccessToken();
+      
+      if (!validToken) {
+        console.log('❌ No valid token available');
+        return false;
+      }
+
+      // Update our instance if token was refreshed
+      if (validToken !== this.accessToken) {
+        console.log('🔄 Token was refreshed, updating service instance');
+        this.setAccessToken(validToken);
+      }
+
       // Test the token by making a simple API call
-      await this.dbx.usersGetCurrentAccount();
-      return true;
+      if (this.dbx) {
+        await this.dbx.usersGetCurrentAccount();
+        console.log('✅ Token validation successful');
+        return true;
+      }
+      
+      return false;
     } catch (error: any) {
       if (error.status === 401) {
-        console.warn('Token validation failed - token is invalid or expired');
+        console.warn('❌ Token validation failed - token is invalid or expired');
+        await tokenManager.clearStoredTokens();
         this.disconnect();
         return false;
       }
       // Other errors might be network issues, so don't disconnect
-      console.warn('Token validation failed with non-auth error:', error);
+      console.warn('⚠️ Token validation failed with non-auth error:', error);
       return false;
     }
   }
@@ -857,11 +1038,16 @@ class DropboxService {
     }
   }
 
-  disconnect() {
+  async disconnect() {
+    console.log('🔌 Disconnecting from Dropbox...');
     this.accessToken = null;
     this.dbx = null;
     this.clearCache();
-    localStorage.removeItem('dropbox_access_token');
+    
+    // Clear all tokens using TokenManager
+    await tokenManager.clearStoredTokens();
+    
+    console.log('✅ Dropbox disconnection complete');
   }
 }
 

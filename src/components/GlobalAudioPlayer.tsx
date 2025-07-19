@@ -3,6 +3,7 @@ import { Play, Pause, SkipForward, SkipBack, Volume2, Music, X } from 'lucide-re
 import { Track } from '../types';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
 import { generatePlaylistCover } from '../utils/generateCover';
+import { ToastContainer } from './ui/ToastContainer';
 import './GlobalAudioPlayer.css';
 
 export const GlobalAudioPlayer: React.FC = () => {
@@ -16,7 +17,9 @@ export const GlobalAudioPlayer: React.FC = () => {
     playPrevious,
     setVolume,
     seek,
-    playTrackFromPlaylist
+    playTrackFromPlaylist,
+    toasts,
+    removeToast
   } = useAudioPlayer();
 
   const [isVisible, setIsVisible] = useState(false);
@@ -141,9 +144,12 @@ export const GlobalAudioPlayer: React.FC = () => {
     setIsVisible(false);
   };
 
-  if (!isVisible || !state.currentTrack) return null;
-
   return (
+    <>
+      {/* Toast Notifications */}
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
+      
+      {!isVisible || !state.currentTrack ? null : (
     <div className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur-sm border-t border-blue-500/20 p-4 z-50">
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between">
@@ -252,7 +258,32 @@ export const GlobalAudioPlayer: React.FC = () => {
       </div>
 
       {/* Hidden Audio Element */}
-      <audio ref={audioRef} preload="metadata" />
+      <audio 
+        ref={audioRef} 
+        preload="metadata" 
+        crossOrigin="anonymous"
+        onLoadStart={() => console.log('🔄 Audio onLoadStart (React event)')}
+        onLoadedMetadata={() => {
+          console.log('📊 Audio onLoadedMetadata (React event)', audioRef.current?.duration);
+          // Manually trigger state update since hook listeners aren't firing
+          if (audioRef.current?.duration && !isNaN(audioRef.current.duration)) {
+            window.dispatchEvent(new CustomEvent('audioMetadataLoaded', {
+              detail: { duration: audioRef.current.duration }
+            }));
+          }
+        }}
+        onTimeUpdate={() => {
+          if (audioRef.current?.currentTime && !isNaN(audioRef.current.currentTime)) {
+            window.dispatchEvent(new CustomEvent('audioTimeUpdate', {
+              detail: { currentTime: audioRef.current.currentTime }
+            }));
+          }
+        }}
+        onCanPlay={() => console.log('▶️ Audio onCanPlay (React event)', audioRef.current?.duration)}
+        onError={(e) => console.error('❌ Audio onError (React event):', e)}
+      />
     </div>
+      )}
+    </>
   );
 };
