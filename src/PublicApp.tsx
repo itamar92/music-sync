@@ -8,6 +8,7 @@ import { LoadingSpinner } from './components/LoadingSpinner';
 import { LoginModal } from './components/LoginModal';
 import { GlobalAudioPlayer } from './components/GlobalAudioPlayer';
 import { PlaylistView } from './components/shared/PlaylistView';
+import { AuthStatus } from './components/AuthStatus';
 import { useAdminRole } from './hooks/useAdminRole';
 import { useDropbox } from './hooks/useDropbox';
 import { auth, db } from './services/firebase';
@@ -411,6 +412,7 @@ export const PublicApp: React.FC = () => {
           </div>
           
           <div className="flex items-center space-x-4">
+            <AuthStatus />
             {renderAuthButton()}
           </div>
         </div>

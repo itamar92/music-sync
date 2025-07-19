@@ -296,12 +296,21 @@ export const useDropbox = () => {
     }
   }, []);
 
-  const disconnect = useCallback(() => {
-    dropboxService.disconnect();
-    setIsConnected(false);
-    setFolders([]);
-    setAllFolders([]);
-    setSyncedFolders([]);
+  const disconnect = useCallback(async () => {
+    try {
+      await dropboxService.disconnect();
+      setIsConnected(false);
+      setFolders([]);
+      setAllFolders([]);
+      setSyncedFolders([]);
+    } catch (error) {
+      console.error('Error during disconnect:', error);
+      // Still update UI state even if disconnect partially fails
+      setIsConnected(false);
+      setFolders([]);
+      setAllFolders([]);
+      setSyncedFolders([]);
+    }
   }, []);
 
   const updateFolderDisplayName = useCallback(async (folderId: string, displayName: string) => {
