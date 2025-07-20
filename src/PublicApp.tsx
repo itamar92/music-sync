@@ -412,7 +412,7 @@ export const PublicApp: React.FC = () => {
           </div>
           
           <div className="flex items-center space-x-4">
-            <AuthStatus />
+            <AuthStatus mode="public" />
             {renderAuthButton()}
           </div>
         </div>
