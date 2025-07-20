@@ -152,7 +152,7 @@ export const AdminDashboard: React.FC = () => {
             </div>
             
             <div className="flex items-center space-x-4">
-              <AuthStatus />
+              <AuthStatus mode="admin" />
               <button
                 onClick={() => navigate('/')}
                 className="px-4 py-2 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"

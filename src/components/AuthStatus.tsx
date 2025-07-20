@@ -2,14 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import { dropboxService } from '../services/dropboxService';
 import { useToast } from '../hooks/useToast';
+import { ConnectionLED } from './ConnectionLED';
+
+interface AuthStatusProps {
+  mode?: 'admin' | 'public';
+}
 
 /**
  * 🔐 Authentication Status Indicator
  * 
  * Shows Dropbox connection status with visual feedback
- * Provides quick reconnection for users
+ * Admin mode: Full interface with reconnect button
+ * Public mode: Simple LED indicator only
  */
-export const AuthStatus: React.FC = () => {
+export const AuthStatus: React.FC<AuthStatusProps> = ({ mode = 'admin' }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const { showConnectionRestored, showAuthError } = useToast();
@@ -48,6 +54,19 @@ export const AuthStatus: React.FC = () => {
     }
   };
 
+  // Public mode: Show only LED indicator
+  if (mode === 'public') {
+    return (
+      <div className="flex items-center gap-2">
+        <ConnectionLED isConnected={isAuthenticated} size="md" />
+        <span className="text-xs text-gray-600">
+          {isAuthenticated ? 'Connected' : 'Offline'}
+        </span>
+      </div>
+    );
+  }
+
+  // Admin mode: Show full interface with reconnect functionality
   if (isAuthenticated) {
     return (
       <div className="flex items-center gap-2 px-3 py-1 bg-green-50 border border-green-200 rounded-lg">
