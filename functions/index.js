@@ -454,11 +454,22 @@ app.post("/exchange-code", async (req, res) => {
     }
 
     if (!DROPBOX_APP_KEY || !DROPBOX_APP_SECRET) {
+      logger.error("Missing Dropbox credentials", { 
+        hasAppKey: !!DROPBOX_APP_KEY, 
+        hasSecret: !!DROPBOX_APP_SECRET,
+        appKeyPrefix: DROPBOX_APP_KEY ? DROPBOX_APP_KEY.substring(0, 4) + "..." : "none"
+      });
       return res.status(500).json({
         success: false,
         error: "Server configuration error: missing Dropbox app credentials"
       });
     }
+
+    logger.info("Token exchange attempt", { 
+      appKeyPrefix: DROPBOX_APP_KEY.substring(0, 4) + "...",
+      hasSecret: !!DROPBOX_APP_SECRET,
+      redirectUri: req.body.redirectUri
+    });
 
     // Exchange code for tokens using PKCE
     const tokenResponse = await fetch("https://api.dropboxapi.com/oauth2/token", {
