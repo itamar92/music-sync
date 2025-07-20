@@ -1,4 +1,4 @@
-import React from 'react';
+// React import needed for JSX
 import { AppRouter } from './AppRouter';
 
 function App() {

@@ -276,9 +276,9 @@ export class TokenEncryption {
         window.crypto &&
         window.crypto.subtle &&
         window.crypto.getRandomValues &&
-        typeof crypto.subtle.encrypt === 'function' &&
-        typeof crypto.subtle.decrypt === 'function' &&
-        typeof crypto.subtle.deriveKey === 'function'
+        typeof window.crypto.subtle.encrypt === 'function' &&
+        typeof window.crypto.subtle.decrypt === 'function' &&
+        typeof window.crypto.subtle.deriveKey === 'function'
       );
     } catch {
       return false;
@@ -380,8 +380,8 @@ export class TokenEncryption {
   static secureCleanup(): void {
     try {
       // Clear any sensitive data from memory (limited effectiveness in JS)
-      if (typeof window !== 'undefined' && window.gc) {
-        window.gc(); // Force garbage collection if available
+      if (typeof window !== 'undefined' && (window as any).gc) {
+        (window as any).gc(); // Force garbage collection if available
       }
       
       console.log('🧹 Secure memory cleanup attempted');

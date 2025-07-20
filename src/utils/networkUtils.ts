@@ -9,7 +9,7 @@ export const waitForOnline = (timeout = 10000): Promise<boolean> => {
       return;
     }
 
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: number;
     
     const handleOnline = () => {
       clearTimeout(timeoutId);

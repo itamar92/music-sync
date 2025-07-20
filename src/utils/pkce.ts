@@ -100,7 +100,7 @@ export class PKCEUtils {
       return !!(
         window.crypto &&
         window.crypto.subtle &&
-        window.crypto.getRandomValues &&
+        typeof window.crypto.getRandomValues === 'function' &&
         window.sessionStorage
       );
     } catch {

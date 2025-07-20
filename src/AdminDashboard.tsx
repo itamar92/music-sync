@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Settings, 
   FolderOpen, 
   Music, 
-  Users, 
   BarChart3, 
   LogOut,
   Menu,

@@ -336,12 +336,18 @@ class TokenManager {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        client_id: clientId,
-        ...(clientSecret && { client_secret: clientSecret })
-      })
+      body: new URLSearchParams(
+        clientSecret ? {
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          client_id: clientId,
+          client_secret: clientSecret
+        } : {
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          client_id: clientId
+        }
+      )
     });
 
     if (!response.ok) {
