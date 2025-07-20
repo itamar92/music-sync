@@ -7,6 +7,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../services/firebase';
 import { useToast } from './useToast';
 import { useDocumentTitle } from './useDocumentTitle';
+import { trackEvent, trackError, trackPerformance } from '../utils/monitoring';
 
 export const useAudioPlayer = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -118,6 +119,14 @@ export const useAudioPlayer = () => {
     } catch (error) {
       console.error('Failed to load track:', error);
       
+      // 📊 Track error for monitoring
+      trackError(error as Error, 'medium', {
+        track_id: track.id,
+        track_path: track.path,
+        user_authenticated: !!user?.uid,
+        preloader_available: user?.uid && track.id
+      });
+      
       // 🔄 RETRY LOGIC: If URL fetch fails, try refreshing nearby URLs and retry
       if (user?.uid && track.id && error instanceof Error && error.message.includes('expired')) {
         console.log('🔄 URL appears expired, refreshing and retrying...');
@@ -129,14 +138,24 @@ export const useAudioPlayer = () => {
             audioRef.current.src = retryUrl;
             audioRef.current.load();
           }
+          trackEvent('track_retry_success', { track_id: track.id });
           return; // Exit early if retry succeeds
         } catch (retryError) {
           console.error('Retry also failed:', retryError);
+          trackError(retryError as Error, 'high', {
+            retry_attempt: true,
+            track_id: track.id
+          });
         }
       }
       
       // 📢 Show user-friendly authentication error
       if (error instanceof Error && error.message.includes('authentication')) {
+        trackEvent('auth_error', {
+          error_message: error.message,
+          context: 'track_loading'
+        });
+        
         showAuthError(error.message, () => {
           // Retry connection by attempting to re-authenticate
           if (dropboxService.authenticate) {
@@ -151,10 +170,30 @@ export const useAudioPlayer = () => {
 
   const play = useCallback(() => {
     if (audioRef.current && audioRef.current.readyState >= 3) {
-      audioRef.current.play().catch(e => console.error("Error playing audio:", e));
-      updateState({ isPlaying: true });
+      const playPromise = audioRef.current.play();
+      
+      playPromise.then(() => {
+        updateState({ isPlaying: true });
+        
+        // 📊 Track successful play event
+        if (state.currentTrack) {
+          trackEvent('track_play', {
+            track_id: state.currentTrack.id,
+            track_name: state.currentTrack.name,
+            artist: state.currentTrack.artist,
+            playlist_position: state.currentTrackIndex,
+            duration: audioRef.current?.duration
+          });
+        }
+      }).catch(e => {
+        console.error("Error playing audio:", e);
+        trackError(e, 'medium', {
+          track_id: state.currentTrack?.id,
+          ready_state: audioRef.current?.readyState
+        });
+      });
     }
-  }, [updateState]);
+  }, [updateState, state.currentTrack, state.currentTrackIndex]);
 
   const pause = useCallback(() => {
     if (audioRef.current) {
