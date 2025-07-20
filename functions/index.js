@@ -441,6 +441,73 @@ function setCache(key, data) {
   });
 }
 
+// Exchange OAuth authorization code for access token
+app.post("/exchange-code", async (req, res) => {
+  try {
+    const { code, codeVerifier } = req.body;
+    
+    if (!code || !codeVerifier) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required parameters: code and codeVerifier"
+      });
+    }
+
+    if (!DROPBOX_APP_KEY || !DROPBOX_APP_SECRET) {
+      return res.status(500).json({
+        success: false,
+        error: "Server configuration error: missing Dropbox app credentials"
+      });
+    }
+
+    // Exchange code for tokens using PKCE
+    const tokenResponse = await fetch("https://api.dropboxapi.com/oauth2/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        code: code,
+        grant_type: "authorization_code",
+        client_id: DROPBOX_APP_KEY,
+        client_secret: DROPBOX_APP_SECRET,
+        code_verifier: codeVerifier,
+      }),
+    });
+
+    const tokenData = await tokenResponse.json();
+
+    if (tokenData.error) {
+      logger.error("Dropbox token exchange failed:", tokenData);
+      return res.status(400).json({
+        success: false,
+        error: `Token exchange failed: ${tokenData.error_description || tokenData.error}`
+      });
+    }
+
+    logger.info("Successfully exchanged OAuth code for tokens");
+    
+    res.json({
+      success: true,
+      data: {
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token,
+        expiresIn: tokenData.expires_in,
+        tokenType: tokenData.token_type,
+        scope: tokenData.scope,
+        accountId: tokenData.account_id,
+        uid: tokenData.uid
+      }
+    });
+  } catch (error) {
+    logger.error("Error in code exchange:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // API Routes
 app.get("/apiStatus", async (req, res) => {
   try {
