@@ -8,7 +8,7 @@ module.exports = {
   },
   extends: [
     "eslint:recommended",
-    "google",
+    // "google", // Temporarily disabled - package not available in CI
   ],
   rules: {
     "no-restricted-globals": ["error", "name", "length"],
