@@ -315,7 +315,8 @@ class TokenManager {
    */
   private async callTokenRefreshAPI(refreshToken: string): Promise<TokenRefreshResponse> {
     const clientId = import.meta.env.VITE_DROPBOX_APP_KEY;
-    const clientSecret = import.meta.env.VITE_DROPBOX_APP_SECRET;
+    // Client secret not needed when using PKCE
+    const clientSecret = undefined;
     
     if (!clientId) {
       throw new Error('Dropbox app key not configured');
@@ -491,7 +492,8 @@ class TokenManager {
    */
   async exchangeCodeForTokens(authCode: string, redirectUri: string, codeVerifier?: string): Promise<TokenData> {
     const clientId = import.meta.env.VITE_DROPBOX_APP_KEY;
-    const clientSecret = import.meta.env.VITE_DROPBOX_APP_SECRET;
+    // Client secret not needed when using PKCE
+    const clientSecret = undefined;
     const useServerEndpoint = import.meta.env.VITE_USE_SERVER_API === 'true';
     
     if (!clientId) {

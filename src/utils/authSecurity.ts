@@ -94,7 +94,8 @@ export class AuthSecurity {
    */
   private static async checkEnvironmentVariables(): Promise<SecurityCheck> {
     const appKey = import.meta.env.VITE_DROPBOX_APP_KEY;
-    const appSecret = import.meta.env.VITE_DROPBOX_APP_SECRET;
+    // Client secret not needed in production with PKCE
+    const appSecret = undefined;
     const useServerApi = import.meta.env.VITE_USE_SERVER_API === 'true';
 
     if (!appKey) {
@@ -448,7 +449,8 @@ export class AuthSecurity {
   private static checkProductionReadiness(): SecurityCheck {
     const isProduction = import.meta.env.PROD;
     const useServerApi = import.meta.env.VITE_USE_SERVER_API === 'true';
-    const hasAppSecret = !!import.meta.env.VITE_DROPBOX_APP_SECRET;
+    // PKCE authentication doesn't require client secret
+    const hasAppSecret = false;
 
     if (isProduction && hasAppSecret) {
       return {
