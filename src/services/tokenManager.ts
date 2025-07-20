@@ -510,7 +510,10 @@ class TokenManager {
       // Try server-side exchange first if configured
       if (useServerEndpoint) {
         console.log('🔄 Using server-side token exchange...');
-        return await this.exchangeCodeViaServer(authCode, redirectUri);
+        if (!codeVerifier) {
+          throw new Error('Code verifier required for server-side exchange');
+        }
+        return await this.exchangeCodeViaServer(authCode, redirectUri, codeVerifier);
       }
 
       // Client-side exchange - use PKCE if available, otherwise require client secret
@@ -572,7 +575,7 @@ class TokenManager {
   /**
    * Exchange authorization code via secure server endpoint
    */
-  private async exchangeCodeViaServer(authCode: string, redirectUri: string): Promise<TokenData> {
+  private async exchangeCodeViaServer(authCode: string, redirectUri: string, codeVerifier: string): Promise<TokenData> {
     const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
     
     if (!apiBaseUrl) {
@@ -586,7 +589,7 @@ class TokenManager {
       },
       body: JSON.stringify({
         code: authCode,
-        redirect_uri: redirectUri
+        codeVerifier: codeVerifier
       })
     });
 
