@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "music-sync-99dbb"
-  }
+  },
+  "targets": {
+    "music-sync-99dbb": {
+      "hosting": {
+        "default": [
+          "music-sync-99dbb"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

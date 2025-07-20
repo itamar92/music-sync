@@ -13,13 +13,13 @@ export default defineConfig({
     
     // Bundle optimization
     rollupOptions: {
+      external: [],
       output: {
         // Chunk splitting for better caching
         manualChunks: {
           // Vendor chunks (rarely change)
           'vendor-react': ['react', 'react-dom'],
           'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
-          'vendor-auth': ['react-firebase-hooks'],
           'vendor-dropbox': ['dropbox'],
           'vendor-ui': ['lucide-react'],
           'vendor-router': ['react-router-dom']
@@ -53,10 +53,14 @@ export default defineConfig({
   
   // Define environment variables
   define: {
-    __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version || '1.0.0'),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
-    __ENVIRONMENT__: JSON.stringify('production')
+    __ENVIRONMENT__: JSON.stringify('production'),
+    'process.env.NODE_ENV': JSON.stringify('production')
   },
+  
+  // Environment mode
+  mode: 'production',
   
   // CSS optimization
   css: {
