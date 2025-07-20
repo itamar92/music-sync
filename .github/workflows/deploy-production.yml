@@ -172,9 +172,9 @@ jobs:
       - name: Health check
         run: |
           if [ "${{ github.event.inputs.environment || 'production' }}" = "production" ]; then
-            URL="https://app.musicsync.com"
+            URL="https://music-sync-99dbb.web.app"
           else
-            URL="https://staging.musicsync.app"
+            URL="https://music-sync-99dbb.web.app"
           fi
           
           echo "🌐 Testing deployment at: $URL"
