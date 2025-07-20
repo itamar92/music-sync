@@ -589,7 +589,8 @@ class TokenManager {
       },
       body: JSON.stringify({
         code: authCode,
-        codeVerifier: codeVerifier
+        codeVerifier: codeVerifier,
+        redirectUri: redirectUri
       })
     });
 

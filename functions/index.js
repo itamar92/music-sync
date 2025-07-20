@@ -444,7 +444,7 @@ function setCache(key, data) {
 // Exchange OAuth authorization code for access token
 app.post("/exchange-code", async (req, res) => {
   try {
-    const { code, codeVerifier } = req.body;
+    const { code, codeVerifier, redirectUri } = req.body;
     
     if (!code || !codeVerifier) {
       return res.status(400).json({
@@ -472,6 +472,7 @@ app.post("/exchange-code", async (req, res) => {
         client_id: DROPBOX_APP_KEY,
         client_secret: DROPBOX_APP_SECRET,
         code_verifier: codeVerifier,
+        redirect_uri: redirectUri || "https://music-sync-99dbb.web.app",
       }),
     });
 
