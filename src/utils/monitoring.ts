@@ -30,10 +30,24 @@ export type AnalyticsEvent =
   | 'dropbox_connect'
   | 'preload_success'
   | 'preload_failure'
-  | 'bundle_loaded';
+  | 'bundle_loaded'
+  | 'track_retry_success'
+  | 'error_occurred'
+  | 'user_engagement'
+  | 'auth_event'
+  | 'dropbox_event'
+  | 'app_initialized';
 
 // Error severity levels
 export type ErrorSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+// Global type extensions
+declare global {
+  interface Window {
+    gtag?: (...args: any[]) => void;
+    dataLayer?: any[];
+  }
+}
 
 // Analytics tracking function
 export const trackEvent = (
