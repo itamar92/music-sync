@@ -486,7 +486,7 @@ app.post("/exchange-code", async (req, res) => {
       });
     }
 
-    logger.info("Successfully exchanged OAuth code for tokens");
+    logger.info("Successfully exchanged OAuth code for tokens", { timestamp: new Date().toISOString() });
     
     res.json({
       success: true,
