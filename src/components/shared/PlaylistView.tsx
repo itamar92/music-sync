@@ -62,19 +62,14 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
 
           const folderData = folderSnapshot.docs[0].data();
           
-          // Use cached track service instead of direct Dropbox call
-          if (user && user.uid) {
-            console.log('Loading tracks with user authentication:', user.uid);
-            return await cachedTrackService.getTracksFromFolder(user.uid, folderId, folderData.dropboxPath);
+          // Use cached track service for both authenticated and anonymous users
+          const userId = user?.uid || null;
+          if (userId) {
+            console.log('Loading tracks with user authentication:', userId);
           } else {
-            console.log('No authenticated user, using Dropbox fallback');
-            // Fallback to direct Dropbox call for non-authenticated users
-            if (!dropboxService.isAuthenticated()) {
-              console.warn('Dropbox not authenticated and no user logged in');
-              return [];
-            }
-            return await dropboxService.getTracksFromFolder(folderData.dropboxPath);
+            console.log('Loading tracks for anonymous user with public token access');
           }
+          return await cachedTrackService.getTracksFromFolder(userId, folderId, folderData.dropboxPath);
         } catch (error) {
           console.error(`Error loading tracks from folder ${folderId}:`, error);
           return [];
