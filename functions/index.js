@@ -594,12 +594,25 @@ app.post("/refresh-token", async (req, res) => {
 // API Routes
 app.get("/apiStatus", async (req, res) => {
   try {
-    const dropboxClient = await getDropboxClient();
+    // Check if we have the required credentials
+    const hasCredentials = !!(DROPBOX_APP_KEY && DROPBOX_APP_SECRET);
+    const hasTokens = !!(DROPBOX_ACCESS_TOKEN || DROPBOX_REFRESH_TOKEN);
+    
+    let dropboxClient = null;
+    if (hasTokens) {
+      try {
+        dropboxClient = await getDropboxClient();
+      } catch (error) {
+        console.warn("Failed to get Dropbox client:", error.message);
+      }
+    }
+    
     res.json({
       success: true,
       data: {
         isInitialized: !!dropboxClient,
-        hasToken: !!DROPBOX_ACCESS_TOKEN || !!DROPBOX_REFRESH_TOKEN,
+        hasToken: hasTokens,
+        hasCredentials: hasCredentials,
         serverTime: new Date().toISOString(),
       },
     });
@@ -609,6 +622,7 @@ app.get("/apiStatus", async (req, res) => {
       data: {
         isInitialized: false,
         hasToken: false,
+        hasCredentials: !!(DROPBOX_APP_KEY && DROPBOX_APP_SECRET),
         serverTime: new Date().toISOString(),
         error: error.message,
       },
@@ -750,8 +764,6 @@ app.get("/getStreamUrl", async (req, res) => {
 exports.api = onRequest(
     {
       secrets: [
-        "DROPBOX_ACCESS_TOKEN",
-        "DROPBOX_REFRESH_TOKEN",
         "DROPBOX_APP_KEY",
         "DROPBOX_APP_SECRET",
       ],
