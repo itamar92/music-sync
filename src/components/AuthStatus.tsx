@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, Globe } from 'lucide-react';
 import { dropboxService } from '../services/dropboxService';
 import { useToast } from '../hooks/useToast';
 import { ConnectionLED } from './ConnectionLED';
+import { PublicTokenService } from '../services/publicTokenService';
 
 interface AuthStatusProps {
   mode?: 'admin' | 'public';
@@ -18,14 +19,26 @@ interface AuthStatusProps {
 export const AuthStatus: React.FC<AuthStatusProps> = ({ mode = 'admin' }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isUsingPublicTokens, setIsUsingPublicTokens] = useState(false);
   const { showConnectionRestored, showAuthError } = useToast();
 
   useEffect(() => {
     // Check initial authentication status
-    setIsAuthenticated(dropboxService.isAuthenticated());
+    const checkAuthStatus = async () => {
+      const authenticated = dropboxService.isAuthenticated();
+      setIsAuthenticated(authenticated);
+      
+      // Check if using public tokens
+      if (authenticated) {
+        const publicTokensAvailable = await PublicTokenService.arePublicTokensAvailable();
+        setIsUsingPublicTokens(publicTokensAvailable);
+      }
+    };
+    
+    checkAuthStatus();
 
     // Poll authentication status every 30 seconds
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       const newAuthStatus = dropboxService.isAuthenticated();
       
       // Show notification when connection is restored
@@ -34,6 +47,12 @@ export const AuthStatus: React.FC<AuthStatusProps> = ({ mode = 'admin' }) => {
       }
       
       setIsAuthenticated(newAuthStatus);
+      
+      // Check public tokens status
+      if (newAuthStatus) {
+        const publicTokensAvailable = await PublicTokenService.arePublicTokensAvailable();
+        setIsUsingPublicTokens(publicTokensAvailable);
+      }
     }, 30000);
 
     return () => clearInterval(interval);
@@ -70,8 +89,19 @@ export const AuthStatus: React.FC<AuthStatusProps> = ({ mode = 'admin' }) => {
   if (isAuthenticated) {
     return (
       <div className="flex items-center gap-2 px-3 py-1 bg-green-50 border border-green-200 rounded-lg">
-        <Wifi className="w-4 h-4 text-green-600" />
-        <span className="text-sm text-green-700 font-medium">Connected</span>
+        {isUsingPublicTokens ? (
+          <Globe className="w-4 h-4 text-blue-600" />
+        ) : (
+          <Wifi className="w-4 h-4 text-green-600" />
+        )}
+        <span className="text-sm text-green-700 font-medium">
+          {isUsingPublicTokens ? 'Public Access' : 'Connected'}
+        </span>
+        {isUsingPublicTokens && (
+          <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
+            Shared
+          </span>
+        )}
       </div>
     );
   }
