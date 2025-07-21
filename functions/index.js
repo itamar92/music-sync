@@ -542,15 +542,13 @@ app.post("/exchange-code", async (req, res) => {
     
     res.json({
       success: true,
-      data: {
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
-        expiresIn: tokenData.expires_in,
-        tokenType: tokenData.token_type,
-        scope: tokenData.scope,
-        accountId: tokenData.account_id,
-        uid: tokenData.uid
-      }
+      access_token: tokenData.access_token,
+      refresh_token: tokenData.refresh_token,
+      expires_in: tokenData.expires_in,
+      token_type: tokenData.token_type,
+      scope: tokenData.scope,
+      account_id: tokenData.account_id,
+      uid: tokenData.uid
     });
   } catch (error) {
     logger.error("Error in code exchange:", error);

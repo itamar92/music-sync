@@ -1,5 +1,7 @@
 import { databaseService } from './databaseService';
 import { dropboxService } from './dropboxService';
+import { apiService } from './apiService';
+import { PublicTokenService } from './publicTokenService';
 import { Track } from '../types';
 
 export class CachedTrackService {
@@ -10,12 +12,12 @@ export class CachedTrackService {
    * 2. If not found or cache is old, fetch from Dropbox
    * 3. Save to database for future use
    */
-  async getTracksFromFolder(userId: string, folderId: string, folderPath: string): Promise<Track[]> {
+  async getTracksFromFolder(userId: string | null, folderId: string, folderPath: string): Promise<Track[]> {
     try {
       // Only try database operations if user is properly authenticated
       if (!userId) {
-        console.log('No userId provided, skipping database cache');
-        return await this.fetchFromDropboxFallback(folderPath);
+        console.log('No userId provided, checking for public token access...');
+        return await this.getTracksForAnonymousUser(folderId, folderPath);
       }
 
       console.log(`Attempting to get cached tracks for userId: ${userId}, folderId: ${folderId}`);
@@ -205,6 +207,39 @@ export class CachedTrackService {
       return await dropboxService.getTracksFromFolder(folderPath);
     } catch (error) {
       console.error('Dropbox fallback failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get tracks for anonymous users using public tokens
+   */
+  private async getTracksForAnonymousUser(folderId: string, folderPath: string): Promise<Track[]> {
+    try {
+      console.log('🌐 Checking public token availability for anonymous access...');
+      
+      // Check if public tokens are available
+      const publicTokensAvailable = await PublicTokenService.arePublicTokensAvailable();
+      
+      if (publicTokensAvailable) {
+        console.log('✅ Public tokens available, using Dropbox service with shared tokens');
+        // Use dropboxService which will automatically use public tokens if available
+        return await dropboxService.getTracksFromFolder(folderPath);
+      } else {
+        console.log('⚠️ No public tokens available, trying public API fallback');
+        // Try the public API as a fallback
+        try {
+          return await apiService.getTracksFromFolder(folderPath);
+        } catch (apiError) {
+          console.error('❌ Public API failed:', apiError);
+          console.log('📋 No public access available for tracks');
+          return [];
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error getting tracks for anonymous user:', error);
+      // Final fallback - return empty array
+      console.log('📋 Returning empty track list for anonymous user');
       return [];
     }
   }
