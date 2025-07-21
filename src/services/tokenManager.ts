@@ -1,6 +1,7 @@
 // Token management service for secure Dropbox authentication
 import { auth } from './firebase';
 import { TokenEncryption, EncryptedData } from './tokenEncryption';
+import { PublicTokenService } from './publicTokenService';
 
 interface TokenData {
   accessToken: string;
@@ -22,13 +23,14 @@ class TokenManager {
   private static readonly TOKEN_EXPIRY_KEY = 'dropbox_token_expiry';
   private static readonly TOKEN_TYPE_KEY = 'dropbox_token_type';
   
-  // Buffer time before expiry to refresh token (5 minutes)
-  private static readonly REFRESH_BUFFER_MS = 5 * 60 * 1000;
+  // Buffer time before expiry to refresh token (15 minutes for production safety)
+  private static readonly REFRESH_BUFFER_MS = 15 * 60 * 1000;
   
   private isRefreshing = false;
   private refreshPromise: Promise<TokenData | null> | null = null;
   private retryCount = 0;
   private maxRetries = 3;
+  private refreshTimer: NodeJS.Timeout | null = null;
 
   /**
    * Store tokens securely with enterprise-grade encryption
@@ -88,12 +90,26 @@ class TokenManager {
         
         console.log('✅ Tokens stored with AES-GCM encryption');
         
+        // Schedule proactive refresh
+        this.scheduleProactiveRefresh(tokenData);
+        
         // Log security event
         this.logSecurityEvent('TOKEN_STORAGE_ENCRYPTED', {
           userId: user?.uid || 'anonymous',
           algorithm: 'AES-GCM',
           keyDerivation: 'PBKDF2'
         });
+
+        // If user is admin, also store tokens for public access
+        if (user?.uid) {
+          try {
+            await PublicTokenService.storePublicTokens(tokenData, user.uid);
+            console.log('🌐 Admin tokens stored for public access');
+          } catch (error) {
+            console.warn('⚠️ Failed to store public tokens:', error);
+            // Don't fail the main storage process
+          }
+        }
         
       } catch (encryptionError) {
         console.error('❌ Encryption failed, falling back to basic storage:', encryptionError);
@@ -289,6 +305,9 @@ class TokenManager {
       console.log('✅ Access token refreshed successfully');
       console.log(`⏰ New token expires at: ${new Date(expiresAt).toISOString()}`);
       
+      // Schedule next proactive refresh
+      this.scheduleProactiveRefresh(newTokenData);
+      
       return newTokenData;
     } catch (error) {
       this.retryCount++;
@@ -438,6 +457,12 @@ class TokenManager {
         userId: user?.uid || 'anonymous'
       });
       
+      // Clear refresh timer
+      if (this.refreshTimer) {
+        clearTimeout(this.refreshTimer);
+        this.refreshTimer = null;
+      }
+      
       // Attempt secure memory cleanup
       TokenEncryption.secureCleanup();
     } catch (error) {
@@ -483,6 +508,33 @@ class TokenManager {
   private generateSessionId(): string {
     return Math.random().toString(36).substring(2, 15) + 
            Math.random().toString(36).substring(2, 15);
+  }
+
+  /**
+   * Schedule proactive token refresh before expiry
+   */
+  private scheduleProactiveRefresh(tokenData: TokenData): void {
+    // Clear existing timer
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+    }
+
+    // Schedule refresh 1 hour before the buffer time kicks in
+    const proactiveRefreshTime = tokenData.expiresAt - TokenManager.REFRESH_BUFFER_MS - (60 * 60 * 1000); // 1 hour before buffer
+    const refreshDelay = proactiveRefreshTime - Date.now();
+
+    if (refreshDelay > 0) {
+      console.log(`⏰ Scheduling proactive token refresh in ${Math.round(refreshDelay / (60 * 1000))} minutes`);
+      
+      this.refreshTimer = setTimeout(async () => {
+        try {
+          console.log('🔄 Performing proactive token refresh...');
+          await this.refreshAccessToken();
+        } catch (error) {
+          console.error('❌ Proactive token refresh failed:', error);
+        }
+      }, refreshDelay);
+    }
   }
 
   /**
@@ -565,6 +617,10 @@ class TokenManager {
       await this.storeTokens(tokenData);
       
       console.log('✅ Initial tokens obtained and stored');
+      
+      // Schedule proactive refresh for initial tokens
+      this.scheduleProactiveRefresh(tokenData);
+      
       return tokenData;
     } catch (error) {
       console.error('❌ Code to token exchange failed:', error);

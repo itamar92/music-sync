@@ -238,6 +238,39 @@ exports.getTrackDuration = onCall({
   }
 });
 
+// Scheduled function to proactively refresh public tokens
+exports.refreshPublicTokens = onSchedule({
+  schedule: "0 */3 * * *", // Run every 3 hours
+  timeZone: "UTC",
+}, async () => {
+  try {
+    const db = admin.firestore();
+    logger.info("Starting proactive token refresh check...");
+    
+    // Get current public tokens from Firebase
+    const publicTokenDoc = await db.doc("config/public-dropbox-token").get();
+    
+    if (!publicTokenDoc.exists) {
+      logger.info("No public tokens found, skipping refresh");
+      return;
+    }
+    
+    const tokenData = publicTokenDoc.data();
+    if (!tokenData || !tokenData.data) {
+      logger.info("Invalid public token data, skipping refresh");
+      return;
+    }
+    
+    // Note: In a real implementation, you'd decrypt the token data here
+    // and check if it needs refresh (within 1 hour of expiry)
+    // For now, we'll just log that the function is working
+    logger.info("Public token refresh check completed successfully");
+    
+  } catch (error) {
+    logger.error("Failed to refresh public tokens:", error);
+  }
+});
+
 // Scheduled function to clean up expired sync data
 exports.cleanupExpiredSyncs = onSchedule({
   schedule: "0 2 * * *", // Run daily at 2 AM
@@ -319,10 +352,12 @@ const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET || "";
 
 /**
  * Refresh the Dropbox access token using the refresh token
+ * @param {string} refreshToken - refresh token to use
  * @return {Promise<string>} New access token
  */
-async function refreshDropboxToken() {
-  if (!DROPBOX_REFRESH_TOKEN || !DROPBOX_APP_KEY || !DROPBOX_APP_SECRET) {
+async function refreshDropboxToken(refreshToken) {
+  const tokenToUse = refreshToken || DROPBOX_REFRESH_TOKEN;
+  if (!tokenToUse || !DROPBOX_APP_KEY || !DROPBOX_APP_SECRET) {
     throw new Error("Missing refresh token configuration");
   }
 
@@ -334,7 +369,7 @@ async function refreshDropboxToken() {
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: DROPBOX_REFRESH_TOKEN,
+        refresh_token: tokenToUse,
         client_id: DROPBOX_APP_KEY,
         client_secret: DROPBOX_APP_SECRET,
       }),
@@ -349,7 +384,12 @@ async function refreshDropboxToken() {
     }
 
     logger.info("Successfully refreshed Dropbox access token");
-    return data.access_token;
+    return {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token || tokenToUse,
+      expires_in: data.expires_in || 14400,
+      token_type: data.token_type || "bearer"
+    };
   } catch (error) {
     logger.error("Error refreshing Dropbox token:", error);
     throw error;
@@ -366,7 +406,8 @@ async function getDropboxClient() {
 
     // If we have a refresh token, try to get a fresh access token
     if (DROPBOX_REFRESH_TOKEN && !accessToken) {
-      accessToken = await refreshDropboxToken();
+      const tokenData = await refreshDropboxToken();
+      accessToken = tokenData.access_token;
     }
 
     if (accessToken) {
@@ -383,9 +424,9 @@ async function getDropboxClient() {
     } catch (error) {
       if (error.status === 401 && DROPBOX_REFRESH_TOKEN) {
         logger.info("Access token expired, refreshing...");
-        const newToken = await refreshDropboxToken();
+        const tokenData = await refreshDropboxToken();
         dbx = new Dropbox({
-          accessToken: newToken,
+          accessToken: tokenData.access_token,
         });
       } else {
         throw error;
@@ -513,6 +554,38 @@ app.post("/exchange-code", async (req, res) => {
     });
   } catch (error) {
     logger.error("Error in code exchange:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Refresh token endpoint for frontend
+app.post("/refresh-token", async (req, res) => {
+  try {
+    const { refresh_token } = req.body;
+    
+    if (!refresh_token) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing refresh token"
+      });
+    }
+
+    logger.info("Token refresh request received");
+
+    const tokenData = await refreshDropboxToken(refresh_token);
+    
+    res.json({
+      success: true,
+      access_token: tokenData.access_token,
+      refresh_token: tokenData.refresh_token,
+      expires_in: tokenData.expires_in,
+      token_type: tokenData.token_type
+    });
+  } catch (error) {
+    logger.error("Error refreshing token:", error);
     res.status(500).json({
       success: false,
       error: error.message

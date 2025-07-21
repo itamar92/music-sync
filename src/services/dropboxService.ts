@@ -5,6 +5,7 @@ import { tokenManager } from './tokenManager';
 import { PKCEUtils } from '../utils/pkce';
 import { KeyRotationService } from './keyRotation';
 import { AuthSecurity } from '../utils/authSecurity';
+import { PublicTokenService } from './publicTokenService';
 
 class DropboxService {
   private dbx: Dropbox | null = null;
@@ -16,7 +17,7 @@ class DropboxService {
   private minRequestInterval = 100; // Minimum 100ms between requests
   private cache = new Map<string, { data: any; timestamp: number; ttl: number }>();
   private maxRetries = 3;
-  private useServerApi = import.meta.env.VITE_USE_SERVER_API === 'true' && false; // Force client-side for now
+  private useServerApi = import.meta.env.VITE_USE_SERVER_API === 'true';
 
   constructor() {
     this.initializeAuth();
@@ -49,10 +50,18 @@ class DropboxService {
         console.log('✅ Dropbox Init: Found valid access token, initializing service');
         this.setAccessToken(validToken);
       } else {
-        console.log('📋 Dropbox Init: No valid token found - user needs to authenticate');
+        console.log('📋 Dropbox Init: No valid token found - checking for public tokens...');
         
-        // Check for legacy token and migrate if valid
-        await this.migrateLegacyToken();
+        // Try to get public tokens for anonymous users
+        const publicTokens = await PublicTokenService.getPublicTokens();
+        if (publicTokens) {
+          console.log('🌐 Dropbox Init: Found public tokens, initializing service');
+          this.setAccessToken(publicTokens.accessToken);
+        } else {
+          console.log('📋 Dropbox Init: No public tokens available - checking legacy tokens...');
+          // Check for legacy token and migrate if valid
+          await this.migrateLegacyToken();
+        }
       }
     } catch (error) {
       console.error('❌ Dropbox Init: Failed to initialize authentication:', error);
