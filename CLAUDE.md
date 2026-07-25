@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Is
 
-**MusicSync** — a React web app that streams music from Dropbox. An admin (the site owner) syncs Dropbox folders into playlists/collections; public visitors can browse and stream them without their own Dropbox account. Hosted on Firebase (Hosting + Functions + Firestore + Storage), project id `music-sync-99dbb`.
+**MusicSync** — a React web app that streams music from Dropbox. An admin (the site owner) syncs Dropbox folders into playlists/collections; public visitors can browse and stream them without their own Dropbox account.
+
+Two deployment modes exist:
+
+- **Container mode (target)** — Docker Compose stack: nginx frontend + Express backend (`server/`) + PostgreSQL, exposed via Cloudflare (Tunnel or DNS). No Firebase. The frontend is built with `VITE_DATA_MODE=server` and talks only to `/api`. See `docs/CONTAINER_DEPLOYMENT.md`.
+- **Firebase mode (legacy)** — Hosting + Functions + Firestore + Storage, project id `music-sync-99dbb`. Still the default for `npm run dev` without `VITE_DATA_MODE=server`.
 
 ## Commands
 
@@ -19,6 +24,8 @@ npm run typecheck          # tsc --noEmit
 There is no test suite yet (`npm run test:ci` is a placeholder echo). Verify changes with `npm run typecheck` and `npm run lint`.
 
 Cloud Functions have their own package: `cd functions && npm run lint`, deploy via `firebase deploy --only functions`.
+
+Container stack: `docker compose up -d --build` (needs `.env` from `.env.docker.example`). Backend alone: `cd server && npm run dev`.
 
 ## Architecture
 
@@ -43,7 +50,19 @@ This is where most logic lives; components should go through services rather tha
 - `firebase.ts` — Firebase app/auth/firestore initialization.
 - `apiService.ts` — client for the Cloud Functions HTTP API.
 
-### Backend (`functions/`)
+### Container backend (`server/`)
+
+Express + Postgres backend for container mode (Node 22, ESM):
+
+- `src/dropbox.js` — server-side Dropbox client: single-flight token refresh shared via Postgres, proactive keepalive refresh, backoff+jitter retries, 401 replay. The only Dropbox credential is `DROPBOX_REFRESH_TOKEN` (env).
+- `src/streamLinks.js` — memory→Postgres cache of Dropbox temporary links (~4h validity); audio is never proxied, the browser streams from Dropbox directly.
+- `src/routes/public.js` — implements the exact REST contract `src/services/publicDataService.ts` expects (`/api/public/collections|playlists|stream|streams`). Stream endpoints only serve paths that belong to a public playlist.
+- `src/routes/admin.js` — JWT login (env-configured admin), collection/playlist CRUD, `POST /sync-folder` (Dropbox folder → playlist + tracks).
+- `src/migrations/*.sql` — applied automatically on boot.
+
+The frontend switches between Firebase and this backend via `VITE_DATA_MODE` (`src/services/dataMode.ts`); server-mode branches live in `PublicApp.tsx`, `shared/PlaylistView.tsx`, and `useAudioPlayer.ts`.
+
+### Firebase backend (`functions/`) — legacy mode
 
 Firebase Cloud Functions (Node 22, CommonJS, Google ESLint style):
 
@@ -66,7 +85,7 @@ Firebase Cloud Functions (Node 22, CommonJS, Google ESLint style):
 
 - `dropbox-music-sync.tsx` at the repo root is an old single-file prototype of the whole app — not imported anywhere; don't extend it.
 - Root-level scripts `generate-refresh-token.js`, `quick-token-exchange.js`, `test-token.js`, `quick-fix.js`, and `debug-dropbox.html` are one-off Dropbox OAuth debugging utilities.
-- `server/` is an empty directory; `README-Backend.md` describes an Express backend whose functionality now lives in `functions/`.
+- `README-Backend.md` describes an older Express backend design; the actual container backend now lives in `server/` (see above).
 - There are duplicate Toast implementations (`components/Toast.tsx` vs `components/ui/Toast.tsx`, same for ToastContainer) — check which one a given import uses.
 - The public/anonymous playback path (public tokens + `publicApi.js`) is the most sensitive area: changes to token handling can break the public site even when the admin flow still works.
 
@@ -76,4 +95,5 @@ Firebase Cloud Functions (Node 22, CommonJS, Google ESLint style):
 - `SETUP_REFRESH_TOKEN.md` — how the long-lived Dropbox refresh token is provisioned.
 - `SECURE_ENCRYPTION_USAGE.md` — token encryption design.
 - `docs/DATABASE_SCHEMA.md` — target relational schema.
-- `DEPLOYMENT.md` — deploy runbook.
+- `DEPLOYMENT.md` — Firebase deploy runbook (legacy mode).
+- `docs/CONTAINER_DEPLOYMENT.md` — container deploy runbook (Windows Docker + Cloudflare).
