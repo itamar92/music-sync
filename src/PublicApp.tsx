@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Music, LogIn, User, Search } from 'lucide-react';
-import { useAuthState } from 'react-firebase-hooks/auth';
 import { signOut } from 'firebase/auth';
+import { useOptionalUser } from './hooks/useOptionalUser';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { LoginModal } from './components/LoginModal';
@@ -12,6 +12,8 @@ import { AuthStatus } from './components/AuthStatus';
 import { useAdminRole } from './hooks/useAdminRole';
 import { useDropbox } from './hooks/useDropbox';
 import { auth, db } from './services/firebase';
+import { publicDataService } from './services/publicDataService';
+import { isServerMode } from './services/dataMode';
 import { Collection, Playlist } from './types';
 import logoImg from '../Logo_IM icon.png';
 
@@ -19,7 +21,7 @@ export const PublicApp: React.FC = () => {
   const { collectionId, playlistId } = useParams();
   const navigate = useNavigate();
   
-  const [user, userLoading] = useAuthState(auth);
+  const [user, userLoading] = useOptionalUser();
   const { isAdmin, loading: adminLoading } = useAdminRole(user?.uid);
   
   
@@ -45,7 +47,12 @@ export const PublicApp: React.FC = () => {
     const loadCollections = async () => {
       try {
         setLoading(true);
-        
+
+        if (isServerMode) {
+          setCollections(await publicDataService.getCollections());
+          return;
+        }
+
         // Load collections directly from Firebase
         const collectionsRef = collection(db, 'collections');
         
@@ -103,7 +110,12 @@ export const PublicApp: React.FC = () => {
 
       try {
         setLoading(true);
-        
+
+        if (isServerMode) {
+          setSelectedCollection(await publicDataService.getCollection(collectionId));
+          return;
+        }
+
         // Load collection directly from Firebase
         const collectionsRef = collection(db, 'collections');
         const collectionQuery = query(
@@ -142,7 +154,22 @@ export const PublicApp: React.FC = () => {
 
       try {
         setLoading(true);
-        
+
+        if (isServerMode) {
+          const playlistData = await publicDataService.getPlaylist(playlistId);
+          setSelectedPlaylist(playlistData);
+          if (playlistData.collectionId) {
+            try {
+              setSelectedCollection(
+                await publicDataService.getCollection(playlistData.collectionId)
+              );
+            } catch {
+              // collection context is optional; playlist still renders
+            }
+          }
+          return;
+        }
+
         // Load playlist directly from Firebase
         const playlistsRef = collection(db, 'playlists');
         const playlistQuery = query(
@@ -220,6 +247,13 @@ export const PublicApp: React.FC = () => {
     setCollectionPlaylists([]);
     
     try {
+      if (isServerMode) {
+        setCollectionPlaylists(
+          await publicDataService.getPlaylistsByCollection(selectedCol.id)
+        );
+        return;
+      }
+
       const playlistsRef = collection(db, 'playlists');
       const playlistsQuery = query(
         playlistsRef,
@@ -326,7 +360,8 @@ export const PublicApp: React.FC = () => {
 
     return (
       <button
-        onClick={() => setShowLoginModal(true)}
+        // In server mode the admin dashboard has its own JWT login screen
+        onClick={() => (isServerMode ? navigate('/admin') : setShowLoginModal(true))}
         className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition-colors"
       >
         <LogIn className="w-4 h-4" />

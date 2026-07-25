@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
+import { isServerMode } from '../services/dataMode';
+import { adminApi } from '../services/adminApiService';
 
 export const useAdminRole = (userId?: string) => {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -8,6 +10,13 @@ export const useAdminRole = (userId?: string) => {
 
   useEffect(() => {
     const checkAdminRole = async () => {
+      if (isServerMode) {
+        // Container mode: admin status is the backend-issued JWT
+        setIsAdmin(adminApi.isLoggedIn());
+        setLoading(false);
+        return;
+      }
+
       if (!userId) {
         setIsAdmin(false);
         setLoading(false);
