@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Music, LogIn, User, Search } from 'lucide-react';
-import { useAuthState } from 'react-firebase-hooks/auth';
 import { signOut } from 'firebase/auth';
+import { useOptionalUser } from './hooks/useOptionalUser';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { LoginModal } from './components/LoginModal';
@@ -21,7 +21,7 @@ export const PublicApp: React.FC = () => {
   const { collectionId, playlistId } = useParams();
   const navigate = useNavigate();
   
-  const [user, userLoading] = useAuthState(auth);
+  const [user, userLoading] = useOptionalUser();
   const { isAdmin, loading: adminLoading } = useAdminRole(user?.uid);
   
   
@@ -360,7 +360,8 @@ export const PublicApp: React.FC = () => {
 
     return (
       <button
-        onClick={() => setShowLoginModal(true)}
+        // In server mode the admin dashboard has its own JWT login screen
+        onClick={() => (isServerMode ? navigate('/admin') : setShowLoginModal(true))}
         className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition-colors"
       >
         <LogIn className="w-4 h-4" />

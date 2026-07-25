@@ -60,7 +60,7 @@ Express + Postgres backend for container mode (Node 22, ESM):
 - `src/routes/admin.js` — JWT login (env-configured admin), collection/playlist CRUD, `POST /sync-folder` (Dropbox folder → playlist + tracks).
 - `src/migrations/*.sql` — applied automatically on boot.
 
-The frontend switches between Firebase and this backend via `VITE_DATA_MODE` (`src/services/dataMode.ts`); server-mode branches live in `PublicApp.tsx`, `shared/PlaylistView.tsx`, and `useAudioPlayer.ts`.
+The frontend switches between Firebase and this backend via `VITE_DATA_MODE` (`src/services/dataMode.ts`); server-mode branches live in `PublicApp.tsx`, `shared/PlaylistView.tsx`, and `useAudioPlayer.ts`. In server mode `/admin` renders `src/admin/ServerAdminDashboard.tsx` (JWT login via `src/services/adminApiService.ts`) instead of the Firebase dashboard, `src/services/firebase.ts` skips initialization (exports are null), and Firebase auth state must be read via `hooks/useOptionalUser.ts` — never call `useAuthState(auth)` directly in components that render in server mode.
 
 ### Firebase backend (`functions/`) — legacy mode
 

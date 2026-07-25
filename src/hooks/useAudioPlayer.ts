@@ -5,8 +5,7 @@ import { cachedTrackService } from '../services/cachedTrackService';
 import { playlistPreloader } from '../services/playlistPreloader';
 import { publicDataService } from '../services/publicDataService';
 import { isServerMode } from '../services/dataMode';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth } from '../services/firebase';
+import { useOptionalUser } from './useOptionalUser';
 import { useToast } from './useToast';
 import { useDocumentTitle } from './useDocumentTitle';
 import { trackEvent, trackError, trackPerformance } from '../utils/monitoring';
@@ -14,7 +13,7 @@ import { trackEvent, trackError, trackPerformance } from '../utils/monitoring';
 export const useAudioPlayer = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playlist, setPlaylistState] = useState<Track[]>([]);
-  const [user] = useAuthState(auth);
+  const [user] = useOptionalUser();
   const { showAuthError, showConnectionRestored, toasts, removeToast } = useToast();
   const [state, setState] = useState<AudioPlayerState>({
     currentTrack: null,

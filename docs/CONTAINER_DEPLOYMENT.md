@@ -40,7 +40,13 @@ Migrations run automatically when the backend starts. Data persists in the
 
 ### Seeding content
 
-Log in and sync a Dropbox folder into a playlist via the admin API:
+Open `http://localhost:8090/admin`, sign in with `ADMIN_EMAIL` / your admin
+password, and use the dashboard: create a collection, browse your Dropbox
+folders in the "Sync Dropbox Folder" panel, and hit **Sync** on a folder to
+turn it into a playlist. Publish/hide, rename, re-assign, and delete are all
+in the same screen.
+
+The same operations are available over the REST API if you prefer scripting:
 
 ```powershell
 # 1. Get a token
@@ -113,4 +119,6 @@ Backup: `docker compose exec db pg_dump -U musicsync musicsync > backup.sql`
   the next 3 tracks on every track change.
 - **Frontend mode switch**: the container build sets `VITE_DATA_MODE=server`,
   which routes the public app and player through `/api` (see
-  `src/services/dataMode.ts`). Builds without it keep the legacy Firebase path.
+  `src/services/dataMode.ts`), serves the JWT-based admin dashboard at
+  `/admin` (`src/admin/ServerAdminDashboard.tsx`), and skips Firebase
+  initialization entirely. Builds without it keep the legacy Firebase path.
