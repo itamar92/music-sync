@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Play, Edit3, Save, X, GripVertical, Pause, Trash2, RefreshCw } from 'lucide-react';
 import { doc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { db, auth } from '../../services/firebase';
+import { useOptionalUser } from '../../hooks/useOptionalUser';
+import { db } from '../../services/firebase';
 import { dropboxService } from '../../services/dropboxService';
 import { cachedTrackService } from '../../services/cachedTrackService';
 import { publicDataService } from '../../services/publicDataService';
@@ -23,7 +23,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
   onPlaylistUpdated,
   isReadOnly = false
 }) => {
-  const [user] = useAuthState(auth);
+  const [user] = useOptionalUser();
   const [playlistTracks, setPlaylistTracks] = useState<Track[]>([]);
   const [loadingTracks, setLoadingTracks] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);

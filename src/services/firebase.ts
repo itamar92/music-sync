@@ -2,6 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { isServerMode } from "./dataMode";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -12,9 +13,13 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// In server mode (containerized deployment) Firebase is not used at all and
+// its env vars are absent — initializing would throw at module load.
+const app = !isServerMode && firebaseConfig.apiKey
+  ? initializeApp(firebaseConfig)
+  : null;
 
-// Initialize and export Firebase services
-export const db = getFirestore(app);
-export const auth = getAuth(app);
+// Typed non-null for the legacy Firebase code paths; those only execute when
+// app is initialized (guarded by isServerMode checks at the call sites).
+export const db = (app ? getFirestore(app) : null) as ReturnType<typeof getFirestore>;
+export const auth = (app ? getAuth(app) : null) as ReturnType<typeof getAuth>;
