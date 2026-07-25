@@ -3,8 +3,9 @@ import { Track, AudioPlayerState } from '../types';
 import { dropboxService } from '../services/dropboxService';
 import { cachedTrackService } from '../services/cachedTrackService';
 import { playlistPreloader } from '../services/playlistPreloader';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth } from '../services/firebase';
+import { publicDataService } from '../services/publicDataService';
+import { isServerMode } from '../services/dataMode';
+import { useOptionalUser } from './useOptionalUser';
 import { useToast } from './useToast';
 import { useDocumentTitle } from './useDocumentTitle';
 import { trackEvent, trackError, trackPerformance } from '../utils/monitoring';
@@ -12,7 +13,7 @@ import { trackEvent, trackError, trackPerformance } from '../utils/monitoring';
 export const useAudioPlayer = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playlist, setPlaylistState] = useState<Track[]>([]);
-  const [user] = useAuthState(auth);
+  const [user] = useOptionalUser();
   const { showAuthError, showConnectionRestored, toasts, removeToast } = useToast();
   const [state, setState] = useState<AudioPlayerState>({
     currentTrack: null,
@@ -69,9 +70,21 @@ export const useAudioPlayer = () => {
     try {
       if (track.path) {
         let streamUrl: string;
-        
+
+        if (isServerMode) {
+          // Containerized deployment: the backend resolves and caches
+          // Dropbox temporary links; prefetch the next tracks so skips
+          // start instantly.
+          streamUrl = await publicDataService.getTrackStreamUrl(track.path);
+          const upcoming = playlist
+            .slice(index + 1, index + 4)
+            .map((t) => t.path || '')
+            .filter(Boolean);
+          if (upcoming.length) {
+            publicDataService.prefetchStreamUrls(upcoming);
+          }
         // 🚀 PERFORMANCE: Try preloader first for instant playback
-        if (user?.uid && track.id) {
+        } else if (user?.uid && track.id) {
           try {
             streamUrl = await playlistPreloader.getValidatedStreamUrl(track.id, track.path);
             console.log('⚡ Using preloaded stream URL for instant playback');
@@ -166,7 +179,7 @@ export const useAudioPlayer = () => {
       
       updateState({ isPlaying: false });
     }
-  }, [updateState, user]);
+  }, [updateState, user, playlist]);
 
   const play = useCallback(() => {
     if (audioRef.current && audioRef.current.readyState >= 3) {

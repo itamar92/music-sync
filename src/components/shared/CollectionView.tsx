@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Music, Plus } from 'lucide-react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { db, auth } from '../../services/firebase';
+import { useOptionalUser } from '../../hooks/useOptionalUser';
+import { db } from '../../services/firebase';
 import { EditCollectionModal } from '../admin/EditCollectionModal';
 
 interface CollectionViewProps {
@@ -18,7 +18,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
   onPlaylistSelect,
   isReadOnly = false
 }) => {
-  const [user] = useAuthState(auth);
+  const [user] = useOptionalUser();
   const [playlists, setPlaylists] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
