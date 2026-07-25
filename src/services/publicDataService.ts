@@ -151,7 +151,54 @@ class PublicDataService {
     }
   }
 
+  // Stream URLs are cached client-side; the backend caches Dropbox temporary
+  // links (~4h validity) so repeat plays and prefetched skips are instant.
+  private streamUrlCache = new Map<string, { url: string; expiresAt: number }>();
+  private static STREAM_URL_TTL_MS = 3 * 60 * 60 * 1000;
+
+  private getCachedStreamUrl(filePath: string): string | null {
+    const hit = this.streamUrlCache.get(filePath);
+    if (hit && hit.expiresAt > Date.now()) return hit.url;
+    this.streamUrlCache.delete(filePath);
+    return null;
+  }
+
+  private setCachedStreamUrl(filePath: string, url: string): void {
+    this.streamUrlCache.set(filePath, {
+      url,
+      expiresAt: Date.now() + PublicDataService.STREAM_URL_TTL_MS,
+    });
+  }
+
+  /**
+   * Batch-resolve stream URLs for upcoming tracks so skipping to the next
+   * track starts playback immediately. Fire-and-forget friendly.
+   */
+  async prefetchStreamUrls(filePaths: string[]): Promise<void> {
+    const missing = filePaths.filter((p) => p && !this.getCachedStreamUrl(p));
+    if (missing.length === 0) return;
+
+    try {
+      const response = await fetch(`${this.baseUrl}/public/streams`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePaths: missing.slice(0, 25) }),
+      });
+      if (!response.ok) return;
+
+      const data = await response.json();
+      for (const [path, url] of Object.entries<string | null>(data.urls || {})) {
+        if (url) this.setCachedStreamUrl(path, url);
+      }
+    } catch (error) {
+      console.warn('Stream URL prefetch failed (non-fatal):', error);
+    }
+  }
+
   async getTrackStreamUrl(filePath: string): Promise<string> {
+    const cached = this.getCachedStreamUrl(filePath);
+    if (cached) return cached;
+
     try {
       const response = await fetch(`${this.baseUrl}/public/stream`, {
         method: 'POST',
@@ -166,6 +213,7 @@ class PublicDataService {
       }
       
       const data = await response.json();
+      this.setCachedStreamUrl(filePath, data.streamUrl);
       return data.streamUrl;
     } catch (error) {
       console.error('Error getting stream URL:', error);

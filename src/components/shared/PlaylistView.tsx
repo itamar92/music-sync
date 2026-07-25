@@ -5,6 +5,8 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { db, auth } from '../../services/firebase';
 import { dropboxService } from '../../services/dropboxService';
 import { cachedTrackService } from '../../services/cachedTrackService';
+import { publicDataService } from '../../services/publicDataService';
+import { isServerMode } from '../../services/dataMode';
 import { Track } from '../../types';
 import { generatePlaylistCover } from '../../utils/generateCover';
 
@@ -42,6 +44,17 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
     setLoadingTracks(true);
     
     try {
+      if (isServerMode) {
+        const tracks = await publicDataService.getPlaylistTracks(playlist.id);
+        setPlaylistTracks(tracks);
+        // Warm the stream-link cache for the first few tracks so playback
+        // starts instantly when the user hits play.
+        publicDataService.prefetchStreamUrls(
+          tracks.slice(0, 5).map((t) => t.path || t.filePath || '').filter(Boolean)
+        );
+        return;
+      }
+
       if (!playlist.folderIds || playlist.folderIds.length === 0) {
         setPlaylistTracks([]);
         return;
