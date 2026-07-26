@@ -1,0 +1,20 @@
+{
+  "name": "musicsync-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Express + Postgres backend for MusicSync container mode",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1"
+  }
+}
