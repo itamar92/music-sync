@@ -4,6 +4,8 @@ import { dropboxService } from '../services/dropboxService';
 import { useToast } from '../hooks/useToast';
 import { ConnectionLED } from './ConnectionLED';
 import { PublicTokenService } from '../services/publicTokenService';
+import { publicDataService } from '../services/publicDataService';
+import { isServerMode } from '../services/dataMode';
 
 interface AuthStatusProps {
   mode?: 'admin' | 'public';
@@ -23,6 +25,26 @@ export const AuthStatus: React.FC<AuthStatusProps> = ({ mode = 'admin' }) => {
   const { showConnectionRestored, showAuthError } = useToast();
 
   useEffect(() => {
+    // Container mode: the browser never connects to Dropbox — the backend holds
+    // the credentials. Reporting this client's (always absent) Dropbox session
+    // would read "Offline" forever, so report the backend's Dropbox health
+    // instead, which is what a visitor actually cares about.
+    if (isServerMode) {
+      let cancelled = false;
+
+      const pollBackend = async () => {
+        const status = await publicDataService.getServerStatus();
+        if (!cancelled) setIsAuthenticated(Boolean(status?.hasToken));
+      };
+
+      pollBackend();
+      const backendInterval = setInterval(pollBackend, 30000);
+      return () => {
+        cancelled = true;
+        clearInterval(backendInterval);
+      };
+    }
+
     // Check initial authentication status
     const checkAuthStatus = async () => {
       const authenticated = dropboxService.isAuthenticated();

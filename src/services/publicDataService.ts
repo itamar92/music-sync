@@ -33,6 +33,23 @@ class PublicDataService {
     });
   }
 
+  /**
+   * Backend health, for the public connection indicator.
+   * Note: /api/status answers 503 when degraded but still returns a JSON body,
+   * so the body is parsed regardless of the status code. Null means the backend
+   * could not be reached at all.
+   */
+  async getServerStatus(): Promise<{ hasToken: boolean; database: boolean } | null> {
+    try {
+      const response = await fetch(`${this.baseUrl}/status`);
+      const data = await response.json();
+      return { hasToken: Boolean(data.hasToken), database: Boolean(data.database) };
+    } catch (error) {
+      console.warn('Backend status check failed:', error);
+      return null;
+    }
+  }
+
   async getCollections(): Promise<Collection[]> {
     const cacheKey = this.getCacheKey('getCollections', {});
     const cached = this.getFromCache<Collection[]>(cacheKey);
