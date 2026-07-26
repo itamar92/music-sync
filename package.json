@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "security:scan": "npm audit --audit-level=moderate",
     "deploy:verify": "node scripts/verify-deployment.js",
+    "dropbox:token": "node scripts/setup-dropbox-token.js",
     "test:ci": "echo 'Tests will be implemented in future versions'",
     "performance:audit": "echo 'Performance audit completed via Firebase Analytics'"
   },
