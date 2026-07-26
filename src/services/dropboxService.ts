@@ -6,6 +6,7 @@ import { PKCEUtils } from '../utils/pkce';
 import { KeyRotationService } from './keyRotation';
 import { AuthSecurity } from '../utils/authSecurity';
 import { PublicTokenService } from './publicTokenService';
+import { isServerMode } from './dataMode';
 
 class DropboxService {
   private dbx: Dropbox | null = null;
@@ -20,6 +21,13 @@ class DropboxService {
   private useServerApi = import.meta.env.VITE_USE_SERVER_API === 'true';
 
   constructor() {
+    // This singleton is constructed at import time. In server mode all Dropbox
+    // access happens in the backend and Firebase is never initialized, so this
+    // client-side auth stack (Firebase-backed token storage, key rotation,
+    // public tokens) has nothing to talk to — running it only produced a wall
+    // of console errors. Skip it; server mode goes through publicDataService.
+    if (isServerMode) return;
+
     this.initializeAuth();
     this.initializeSecurity();
   }

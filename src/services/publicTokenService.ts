@@ -7,6 +7,7 @@
 
 import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
+import { isServerMode } from './dataMode';
 import { TokenData } from './tokenManager';
 import { TokenEncryption } from './tokenEncryption';
 
@@ -24,9 +25,21 @@ export class PublicTokenService {
   private static readonly ENCRYPTION_KEY = 'public-token-key';
 
   /**
+   * Public tokens only exist in Firebase mode. In server mode `db` is null and
+   * every call here would throw an opaque Firestore error, so callers get the
+   * "no public tokens" answer instead.
+   */
+  private static get unavailable(): boolean {
+    return isServerMode || !db;
+  }
+
+  /**
    * Store admin's tokens for public access
    */
   static async storePublicTokens(tokenData: TokenData, adminId: string): Promise<void> {
+    if (this.unavailable) {
+      throw new Error('Public tokens are a Firebase-mode feature and are unavailable here');
+    }
     try {
       console.log('🔄 Storing public Dropbox tokens...');
 
@@ -58,6 +71,7 @@ export class PublicTokenService {
    * Retrieve shared tokens for anonymous users
    */
   static async getPublicTokens(): Promise<PublicTokenData | null> {
+    if (this.unavailable) return null;
     try {
       console.log('🔄 Fetching public Dropbox tokens...');
 
@@ -104,6 +118,7 @@ export class PublicTokenService {
    * Remove public tokens (admin only)
    */
   static async removePublicTokens(): Promise<void> {
+    if (this.unavailable) return;
     try {
       console.log('🔄 Removing public tokens...');
       await deleteDoc(doc(db, this.PUBLIC_TOKEN_DOC));
