@@ -4,6 +4,7 @@ import { Folder, Track } from '../types';
 import { dropboxService } from '../services/dropboxService';
 import { databaseService } from '../services/databaseService';
 import { auth } from '../services/firebase';
+import { isServerMode } from '../services/dataMode';
 
 export const useDropbox = () => {
   const [isConnected, setIsConnected] = useState(false);
@@ -19,6 +20,11 @@ export const useDropbox = () => {
 
 
   useEffect(() => {
+    // Server mode never initializes Firebase, so `auth` is null. PublicApp calls
+    // this hook on the root route; without the guard the effect throws and takes
+    // the whole public app down with a blank page.
+    if (isServerMode || !auth) return;
+
     const unsubscribe = auth.onAuthStateChanged(user => {
       if (user) {
         setUserId(user.uid);
