@@ -1,15 +1,8 @@
 import React, { useState } from 'react';
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { 
-  Settings, 
-  FolderOpen, 
-  Music, 
-  BarChart3, 
-  LogOut,
-  Menu,
-  X
-} from 'lucide-react';
-import { auth } from './services/firebase';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { useAdminSession } from './hooks/useAdminSession';
+import { ServerAdminLogin } from './admin/ServerAdminLogin';
+import { LoadingSpinner } from './components/LoadingSpinner';
 import { CollectionManagement } from './components/admin/CollectionManagement';
 import { FolderSyncManagement } from './components/admin/FolderSyncManagement';
 import { PlaylistManagement } from './components/admin/PlaylistManagement';
@@ -17,154 +10,214 @@ import { AdminOverview } from './components/admin/AdminOverview';
 import { AdminSettings } from './components/admin/AdminSettings';
 import { GlobalAudioPlayer } from './components/GlobalAudioPlayer';
 import { AuthStatus } from './components/AuthStatus';
-import logoImg from '../Logo_IM icon.png';
+import { WaveMark } from './components/nocturne/WaveMark';
+import { Icon, IconName } from './components/nocturne/icons';
+
+/**
+ * The studio shell — sidebar, top bar and the routed panel.
+ *
+ * Same routes and behaviour as before; the chrome now speaks Nocturne so the
+ * admin and the public site read as one product.
+ */
+
+interface MenuItem {
+  path: string;
+  label: string;
+  icon: IconName;
+  exact?: boolean;
+}
+
+const MENU: MenuItem[] = [
+  { path: '/admin', label: 'Overview', icon: 'chart', exact: true },
+  { path: '/admin/collections', label: 'Collections', icon: 'folder' },
+  { path: '/admin/folders', label: 'Folder sync', icon: 'refresh' },
+  { path: '/admin/playlists', label: 'Playlists', icon: 'music' },
+  { path: '/admin/settings', label: 'Settings', icon: 'gear' },
+];
 
 export const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const session = useAdminSession();
 
-  const handleSignOut = async () => {
-    try {
-      await auth.signOut();
-      navigate('/');
-    } catch (error) {
-      console.error('Error signing out:', error);
-    }
-  };
+  const isActive = (path: string, exact = false) =>
+    exact ? location.pathname === path : location.pathname.startsWith(path);
 
-  const menuItems = [
-    { 
-      path: '/admin', 
-      label: 'Overview', 
-      icon: BarChart3, 
-      exact: true 
-    },
-    { 
-      path: '/admin/collections', 
-      label: 'Collections', 
-      icon: FolderOpen 
-    },
-    { 
-      path: '/admin/folders', 
-      label: 'Folder Sync', 
-      icon: FolderOpen 
-    },
-    { 
-      path: '/admin/playlists', 
-      label: 'Playlists', 
-      icon: Music 
-    },
-    { 
-      path: '/admin/settings', 
-      label: 'Settings', 
-      icon: Settings 
-    },
-  ];
+  const current = MENU.find((item) => isActive(item.path, item.exact));
 
-  const isActiveRoute = (path: string, exact = false) => {
-    if (exact) {
-      return location.pathname === path;
-    }
-    return location.pathname.startsWith(path);
-  };
+  if (session.loading) {
+    return (
+      <div
+        className="nc-page"
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  // Container mode asks for credentials here; Firebase mode was gated upstream
+  // by the router, so an unauthenticated visitor never reaches this component.
+  if (!session.isAuthenticated) {
+    return session.needsOwnLogin ? (
+      <ServerAdminLogin onSuccess={session.markSignedIn} />
+    ) : (
+      <Navigate to="/" replace />
+    );
+  }
+
+  const signOut = () => session.signOut();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-black text-white flex">
-      {/* Mobile sidebar backdrop */}
+    <div className="nc-page" style={{ minHeight: '100vh', display: 'flex' }}>
       {sidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+        <div
           onClick={() => setSidebarOpen(false)}
+          role="presentation"
+          style={{ position: 'fixed', inset: 0, background: 'rgba(8,9,16,0.6)', zIndex: 40 }}
+          className="nc-admin-scrim"
         />
       )}
 
-      {/* Sidebar */}
-      <div className={`
-        fixed inset-y-0 left-0 z-50 w-64 bg-gray-900/95 backdrop-blur-sm border-r border-gray-700/50 transform transition-transform duration-300 ease-in-out
-        lg:relative lg:translate-x-0
-        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
-        <div className="flex items-center justify-between p-6">
-          <div className="flex items-center space-x-3">
-            <img src={logoImg} alt="App Logo" className="w-20 h-20 object-contain" />
-            <span className="text-lg font-bold">Admin Panel</span>
+      <aside
+        className={`nc-admin-sidebar${sidebarOpen ? ' is-open' : ''}`}
+        style={{
+          width: 248,
+          flexShrink: 0,
+          background: 'rgba(16,18,32,0.96)',
+          borderRight: '1px solid var(--nc-line)',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '18px 20px',
+            height: 58,
+            borderBottom: '1px solid var(--nc-line)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+            <WaveMark height={22} />
+            <span style={{ fontSize: 14, fontWeight: 500, letterSpacing: '0.02em' }}>Studio</span>
           </div>
           <button
+            className="nc-btn nc-btn-icon nc-admin-close"
+            style={{ width: 28, height: 28 }}
             onClick={() => setSidebarOpen(false)}
-            className="lg:hidden p-2 hover:bg-gray-700 rounded-lg transition-colors"
+            aria-label="Close menu"
           >
-            <X className="w-5 h-5" />
+            <Icon name="x" size={14} />
           </button>
         </div>
 
-        <nav className="px-6">
-          <ul className="space-y-2">
-            {menuItems.map((item) => (
-              <li key={item.path}>
-                <button
-                  onClick={() => {
-                    navigate(item.path);
-                    setSidebarOpen(false);
-                  }}
-                  className={`
-                    w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-left transition-colors
-                    ${isActiveRoute(item.path, item.exact) 
-                      ? 'bg-blue-600 text-white' 
-                      : 'text-gray-300 hover:bg-gray-700/50 hover:text-white'
-                    }
-                  `}
-                >
-                  <item.icon className="w-5 h-5" />
-                  <span>{item.label}</span>
-                </button>
-              </li>
-            ))}
+        <nav style={{ padding: 12, flex: 1 }}>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 2 }}>
+            {MENU.map((item) => {
+              const active = isActive(item.path, item.exact);
+              return (
+                <li key={item.path}>
+                  <button
+                    onClick={() => {
+                      navigate(item.path);
+                      setSidebarOpen(false);
+                    }}
+                    className="nc-row-hover"
+                    style={{
+                      position: 'relative',
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 11,
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      background: active ? 'rgba(34,184,214,0.10)' : 'transparent',
+                      border: 'none',
+                      color: active ? 'var(--nc-accent-text-bright)' : 'var(--nc-text-soft)',
+                      fontFamily: 'inherit',
+                      fontSize: 13.5,
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {active && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          top: 9,
+                          bottom: 9,
+                          width: 2,
+                          borderRadius: 2,
+                          background: 'var(--nc-cy)',
+                          boxShadow: '0 0 10px var(--nc-cy)',
+                        }}
+                      />
+                    )}
+                    <Icon name={item.icon} size={16} />
+                    {item.label}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 p-6">
-          <button
-            onClick={handleSignOut}
-            className="w-full flex items-center space-x-3 px-4 py-3 text-gray-300 hover:bg-red-600/20 hover:text-red-400 rounded-lg transition-colors"
-          >
-            <LogOut className="w-5 h-5" />
-            <span>Sign Out</span>
+        <div style={{ padding: 12, borderTop: '1px solid var(--nc-line)' }}>
+          <button className="nc-btn nc-btn-block" onClick={signOut}>
+            <Icon name="signOut" size={15} />
+            Sign out
           </button>
         </div>
-      </div>
+      </aside>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col min-h-screen">
-        {/* Top bar */}
-        <header className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700/50 px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-2 hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                <Menu className="w-5 h-5" />
-              </button>
-              <h1 className="text-xl font-semibold">
-                {menuItems.find(item => isActiveRoute(item.path, item.exact))?.label || 'Admin Dashboard'}
-              </h1>
-            </div>
-            
-            <div className="flex items-center space-x-4">
-              <AuthStatus mode="admin" />
-              <button
-                onClick={() => navigate('/')}
-                className="px-4 py-2 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                View Public Site
-              </button>
-            </div>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <header
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            padding: '0 24px',
+            height: 58,
+            flexShrink: 0,
+            borderBottom: '1px solid var(--nc-line)',
+            background: 'rgba(16,18,32,0.7)',
+            backdropFilter: 'blur(10px)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+            <button
+              className="nc-btn nc-btn-icon nc-admin-burger"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open menu"
+            >
+              <Icon name="list" size={16} />
+            </button>
+            <h1 className="nc-truncate" style={{ margin: 0, fontSize: 15, fontWeight: 500 }}>
+              {current?.label || 'Studio'}
+            </h1>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            <AuthStatus mode="admin" />
+            <button className="nc-btn" onClick={() => navigate('/')}>
+              View public site
+            </button>
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 p-6 overflow-auto">
+        {/* Bottom padding keeps the last row clear of the fixed transport. */}
+        <main className="nc-scroll" style={{ flex: 1, padding: '28px 24px 120px' }}>
           <Routes>
             <Route path="/" element={<AdminOverview />} />
             <Route path="/collections/*" element={<CollectionManagement />} />
@@ -174,8 +227,7 @@ export const AdminDashboard: React.FC = () => {
           </Routes>
         </main>
       </div>
-      
-      {/* Global Audio Player */}
+
       <GlobalAudioPlayer />
     </div>
   );

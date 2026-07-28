@@ -36,6 +36,9 @@ export interface Track {
   // Aliases for custom names (stored locally or in db)
   displayName?: string;
   displayArtist?: string;
+  // Curation state, reported by the container backend's admin API.
+  isExcluded?: boolean;
+  sortOrder?: number;
   isActive?: boolean;
   createdBy?: User;
   createdAt?: string;

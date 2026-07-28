@@ -238,6 +238,36 @@ class PublicDataService {
     }
   }
 
+  // Tracks whose duration this session has already reported, so a repeat play
+  // doesn't repeat the request.
+  private reportedDurations = new Set<string>();
+
+  /**
+   * Tell the backend how long a track actually is.
+   *
+   * The server hands out Dropbox links but never reads the audio, so it can't
+   * know a duration at sync time without downloading and parsing every file.
+   * The player learns the exact figure from the <audio> element on first load,
+   * so it reports it once and everyone after that sees a real time instead of
+   * 0:00. Fire-and-forget: the backend ignores anything it already knows, and a
+   * failure here must never disturb playback.
+   */
+  async reportTrackDuration(trackId: string, durationSeconds: number): Promise<void> {
+    if (!trackId || this.reportedDurations.has(trackId)) return;
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return;
+
+    this.reportedDurations.add(trackId);
+    try {
+      await fetch(`${this.baseUrl}/public/tracks/${trackId}/duration`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ durationSeconds: Math.round(durationSeconds) }),
+      });
+    } catch (error) {
+      console.warn('Duration report failed (non-fatal):', error);
+    }
+  }
+
   clearCache(): void {
     this.cache.clear();
   }

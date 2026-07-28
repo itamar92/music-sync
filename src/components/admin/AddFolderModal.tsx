@@ -1,593 +1,443 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  X, 
-  FolderOpen as FolderIcon, 
-  Music, 
-  ArrowLeft, 
-  Search, 
-  ChevronRight,
-  Home,
-  Check,
-  Maximize2,
-  Minimize2
-} from 'lucide-react';
-import { doc, setDoc } from 'firebase/firestore';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { db, auth } from '../../services/firebase';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useDropbox } from '../../hooks/useDropbox';
-import { Folder } from '../../types';
+import { adminData, DropboxEntry } from '../../services/adminData';
+import { FolderRecord } from './types';
+import { Modal } from '../Modal';
+import { DialogActions, FormError } from '../nocturne/Picker';
+import { Icon } from '../nocturne/icons';
+
+/**
+ * Browse Dropbox and start watching a folder.
+ *
+ * Where the Dropbox credential lives decides how this behaves. In Firebase mode
+ * the browser holds the user's own OAuth token, so the modal may have to send
+ * them through Dropbox first. In container mode the backend holds a refresh
+ * token, the browser never authenticates, and browsing is simply a server call
+ * — so none of the connect flow renders at all.
+ */
 
 interface AddFolderModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (folder: any) => void;
+  onSuccess: (folder: FolderRecord) => void;
 }
 
-export const AddFolderModal: React.FC<AddFolderModalProps> = ({
-  isOpen,
-  onClose,
-  onSuccess
-}) => {
-  const [user] = useAuthState(auth);
-  const [selectedFolder, setSelectedFolder] = useState<Folder | null>(null);
-  const [syncFrequency, setSyncFrequency] = useState('manual');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [showBrowser, setShowBrowser] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
+/** Counts fill in per row as they resolve, rather than blocking the listing. */
+interface FolderStatsState {
+  [path: string]: { trackCount: number; hasSubfolders: boolean } | 'loading';
+}
 
-  const {
-    isConnected,
-    isConnecting,
-    managementFolders,
-    managementPath,
-    navigateToManagementFolder,
-    navigateManagementBack,
-    loadManagementFolders,
-    connect,
-    retry,
-    error: dropboxError
-  } = useDropbox();
+export const AddFolderModal: React.FC<AddFolderModalProps> = ({ isOpen, onClose, onSuccess }) => {
+  const { clientDropboxAuth } = adminData.capabilities;
+  const clientDropbox = useDropbox();
+
+  const [path, setPath] = useState('');
+  const [entries, setEntries] = useState<DropboxEntry[]>([]);
+  const [stats, setStats] = useState<FolderStatsState>({});
+  const [selected, setSelected] = useState<DropboxEntry | null>(null);
+  const [frequency, setFrequency] = useState('manual');
+  const [search, setSearch] = useState('');
+  const [browsing, setBrowsing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  // Container mode has nothing to connect; treat it as always ready.
+  const connected = clientDropboxAuth ? clientDropbox.isConnected : true;
+  const connecting = clientDropboxAuth ? clientDropbox.isConnecting : false;
+  const connectionError = clientDropboxAuth ? clientDropbox.error : null;
+
+  const browse = useCallback(async (nextPath: string) => {
+    setBrowsing(true);
+    setError('');
+    try {
+      const rows = await adminData.browseDropbox(nextPath);
+      setEntries(rows);
+      setPath(nextPath);
+      setStats({});
+    } catch (browseError) {
+      console.error('Failed to browse Dropbox:', browseError);
+      setError(browseError instanceof Error ? browseError.message : 'Failed to browse Dropbox');
+    } finally {
+      setBrowsing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (isOpen) {
-      // Check if we're connected first, then try to load folders
-      if (isConnected) {
-        loadManagementFolders('').then(() => {
-          setShowBrowser(true);
-        }).catch((err) => {
-          console.log('Folder load failed despite connection:', err);
-          setError('Failed to load folders. Please try reconnecting.');
-        });
-      } else {
-        // If not connected, the modal will show the connection prompt
-        console.log('Not connected to Dropbox, showing connection prompt');
+    if (isOpen && connected) browse('');
+  }, [isOpen, connected, browse]);
+
+  // Ask for each visible folder's contents once the listing is on screen.
+  useEffect(() => {
+    if (!entries.length) return;
+
+    let cancelled = false;
+    (async () => {
+      for (const entry of entries) {
+        if (cancelled) return;
+        setStats((prev) => (prev[entry.path] ? prev : { ...prev, [entry.path]: 'loading' }));
+        try {
+          const result = await adminData.folderStats(entry.path);
+          if (!cancelled) setStats((prev) => ({ ...prev, [entry.path]: result }));
+        } catch {
+          // A folder we can't inspect is still selectable; leave it unlabelled.
+          if (!cancelled) {
+            setStats((prev) => ({
+              ...prev,
+              [entry.path]: { trackCount: 0, hasSubfolders: false },
+            }));
+          }
+        }
       }
-    }
-  }, [isOpen, isConnected, loadManagementFolders]);
+    })();
 
-  const filteredFolders = managementFolders.filter(folder =>
-    folder.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    folder.path.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+    return () => {
+      cancelled = true;
+    };
+  }, [entries]);
 
-  const getBreadcrumbs = () => {
-    if (!managementPath) return ['Home'];
-    
-    const parts = managementPath.split('/').filter(Boolean);
-    return ['Home', ...parts];
-  };
-
-  const navigateToBreadcrumb = (index: number) => {
-    if (index === 0) {
-      navigateToManagementFolder('');
-    } else {
-      const parts = managementPath.split('/').filter(Boolean);
-      const newPath = '/' + parts.slice(0, index).join('/');
-      navigateToManagementFolder(newPath);
-    }
-  };
-
-  const handleFolderSelect = (folder: Folder) => {
-    setSelectedFolder(folder);
-  };
-
-  const handleFolderDoubleClick = (folder: Folder) => {
-    if (folder.hasSubfolders) {
-      navigateToManagementFolder(folder.path);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!user) {
-      setError('You must be logged in to add a folder');
-      return;
-    }
-
-    if (!selectedFolder) {
-      setError('Please select a folder to sync');
-      return;
-    }
-
-    setLoading(true);
+  const close = () => {
+    setSelected(null);
+    setFrequency('manual');
+    setSearch('');
     setError('');
-
-    try {
-      // Generate a valid Firestore document ID from the folder path
-      const folderId = selectedFolder.path
-        .replace(/^\/+|\/+$/g, '') // Remove leading/trailing slashes
-        .replace(/[\/\s]+/g, '_') // Replace slashes and spaces with underscores
-        .replace(/[^a-zA-Z0-9_-]/g, '') // Remove invalid characters
-        .toLowerCase();
-      
-      const folderRef = doc(db, 'folderSyncs', folderId);
-      
-      const newFolder = {
-        id: folderId,
-        name: selectedFolder.name,
-        displayName: selectedFolder.displayName || selectedFolder.name,
-        dropboxPath: selectedFolder.path,
-        dropboxId: selectedFolder.id,
-        syncFrequency: syncFrequency,
-        userId: user.uid,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        lastSyncAt: null,
-        status: 'pending',
-        totalFiles: selectedFolder.trackCount || 0,
-        syncedFiles: 0,
-        isActive: true,
-        hasSubfolders: selectedFolder.hasSubfolders
-      };
-
-      await setDoc(folderRef, newFolder);
-      
-      onSuccess(newFolder);
-      handleClose();
-    } catch (error) {
-      console.error('Error adding folder:', error);
-      setError('Failed to add folder. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleClose = () => {
-    setSelectedFolder(null);
-    setSyncFrequency('manual');
-    setSearchQuery('');
-    setError('');
-    setShowBrowser(false);
+    setEntries([]);
+    setStats({});
     onClose();
   };
 
-  const handleConnect = async () => {
+  const connect = async () => {
     setError('');
-    console.log('Add Folder Modal: Initiating Dropbox connection...');
-    console.log('Add Folder Modal: Current URL:', window.location.href);
-    console.log('Add Folder Modal: Origin for redirect:', window.location.origin);
-    
-    // Use the same method as the test but with automatic redirect
     try {
       const { dropboxService } = await import('../../services/dropboxService');
       const authUrl = await dropboxService.authenticate(false);
       if (authUrl && typeof authUrl === 'string') {
-        console.log('Add Folder Modal: Redirecting to auth URL...');
-        // Store the current modal state so we can restore it after auth
+        // Remembered so FolderSyncManagement can reopen this modal on return.
         localStorage.setItem('dropbox_auth_in_progress', 'true');
         localStorage.setItem('dropbox_auth_modal', 'folder_add');
         window.location.href = authUrl;
       }
     } catch (err) {
-      console.error('Add Folder Modal: Failed to get auth URL:', err);
+      console.error('Failed to get auth URL:', err);
       setError(`Failed to start authentication: ${err}`);
     }
   };
 
-  const handleTestAuth = async () => {
+  /**
+   * Escape hatch for when the OAuth redirect can't return to the app — strict
+   * popup blockers, or a mismatched redirect URI. The user pastes the URL they
+   * landed on and the code is read out of it.
+   */
+  const pasteCallback = async () => {
+    const callbackUrl = window.prompt(
+      'Paste the full URL you were redirected to after Dropbox authentication:'
+    );
+    if (!callbackUrl) return;
+
     try {
-      const { dropboxService } = await import('../../services/dropboxService');
-      console.log('Test: Getting auth URL without redirect...');
-      const authUrl = await dropboxService.authenticate(false);
-      console.log('Test: Generated auth URL:', authUrl);
-      
-      if (authUrl && typeof authUrl === 'string') {
-        // Show the URL in an alert so you can see it
-        alert(`Generated auth URL:\n\n${authUrl}\n\nThis will open in a new tab. After you authenticate, copy the URL you're redirected to and paste it here.`);
-        console.log('Test: Opening auth URL in new tab...');
-        window.open(authUrl, '_blank');
-      } else {
-        alert('Failed to generate auth URL. Check console for errors.');
-      }
-    } catch (err) {
-      console.error('Test: Failed to generate auth URL:', err);
-      alert(`Error generating auth URL: ${err}`);
-    }
-  };
-
-  const handleRetry = () => {
-    setError('');
-    retry();
-  };
-
-  const handleManualCallback = () => {
-    const callbackUrl = prompt('Paste the full URL you were redirected to after Dropbox authentication:');
-    if (callbackUrl) {
-      console.log('Manual callback URL:', callbackUrl);
       const url = new URL(callbackUrl);
       const code = url.searchParams.get('code');
       const accessToken = url.hash.match(/access_token=([^&]+)/)?.[1];
-      
-      console.log('Extracted code:', code);
-      console.log('Extracted access token:', accessToken);
-      
+      const { dropboxService } = await import('../../services/dropboxService');
+
       if (code) {
-        handleAuthCallback(code);
+        if (!(await dropboxService.handleAuthCallback(code))) {
+          setError('Failed to exchange the authorization code for an access token');
+          return;
+        }
       } else if (accessToken) {
         localStorage.setItem('dropbox_access_token', accessToken);
-        setShowBrowser(true);
-        loadManagementFolders('');
       } else {
-        alert('No authorization code or access token found in the URL');
+        setError('No authorization code or access token found in that URL');
+        return;
       }
+
+      await browse('');
+    } catch (err) {
+      setError(`Authentication failed: ${err}`);
     }
   };
 
-  const handleAuthCallback = async (code: string) => {
+  const submit = async () => {
+    if (!selected) {
+      setError('Please select a folder to sync');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
     try {
-      setLoading(true);
-      const { dropboxService } = await import('../../services/dropboxService');
-      const success = await dropboxService.handleAuthCallback(code);
-      if (success) {
-        setShowBrowser(true);
-        await loadManagementFolders('');
-      } else {
-        setError('Failed to exchange authorization code for access token');
-      }
-    } catch (err) {
-      setError(`Authentication failed: ${err}`);
+      onSuccess(
+        await adminData.addFolder({
+          dropboxPath: selected.path,
+          name: selected.name,
+          displayName: selected.name,
+          syncFrequency: frequency,
+        })
+      );
+      close();
+    } catch (submitError) {
+      console.error('Error adding folder:', submitError);
+      setError(submitError instanceof Error ? submitError.message : 'Failed to add folder');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
   if (!isOpen) return null;
 
-  // Show loading while checking connection or loading folders
-  if (isConnecting || (isConnected && !showBrowser && managementFolders.length === 0 && !dropboxError)) {
-    return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-gray-800 rounded-xl p-6 w-full max-w-md">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center space-x-3">
-              <FolderIcon className="w-6 h-6 text-yellow-400" />
-              <h2 className="text-xl font-bold text-white">Loading Dropbox Folders</h2>
-            </div>
-            <button
-              onClick={handleClose}
-              className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-gray-400" />
-            </button>
-          </div>
+  // ── needs the browser to authenticate (Firebase mode only) ────────────────
+  if (clientDropboxAuth && !connected) {
+    const expired = connectionError?.includes('expired');
 
-          <div className="text-center py-6">
-            <div className="w-8 h-8 animate-spin rounded-full border-t-2 border-b-2 border-yellow-500 mx-auto mb-4"></div>
-            <p className="text-gray-400">Connecting to Dropbox and loading folders...</p>
-          </div>
+    return (
+      <Modal
+        isOpen
+        onClose={close}
+        title={expired ? 'Dropbox session expired' : 'Connect to Dropbox'}
+        kicker="Folder sync"
+        width={420}
+      >
+        <p style={{ margin: '0 0 8px', fontSize: 13.5, color: 'var(--nc-mut)', lineHeight: 1.6 }}>
+          {connectionError || 'Connect your Dropbox account to browse and sync folders.'}
+        </p>
+        <p style={{ margin: '0 0 18px', fontSize: 12.5, color: 'var(--nc-dim)' }}>
+          {expired
+            ? 'Reconnect to continue where you left off.'
+            : 'You will be sent to Dropbox and returned here afterwards.'}
+        </p>
+
+        <FormError message={error} />
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+          <button
+            className="nc-btn"
+            style={{ flex: 1, height: 38 }}
+            onClick={() => {
+              setError('');
+              clientDropbox.retry();
+            }}
+            disabled={connecting}
+          >
+            {connecting ? 'Checking…' : 'Retry'}
+          </button>
+          <button className="nc-btn nc-btn-accent" style={{ flex: 1, height: 38 }} onClick={connect}>
+            Connect Dropbox
+          </button>
         </div>
-      </div>
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--nc-line)' }}>
+          <button className="nc-link" style={{ fontSize: 12.5 }} onClick={pasteCallback}>
+            <Icon name="warning" size={13} />
+            Redirect didn&apos;t come back? Paste the callback URL
+          </button>
+        </div>
+      </Modal>
     );
   }
 
-  // Show connection prompt only if we have an error or definitely not connected
-  if (!isConnected && !showBrowser && (dropboxError || managementFolders.length === 0)) {
-    return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-gray-800 rounded-xl p-6 w-full max-w-md">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center space-x-3">
-              <FolderIcon className="w-6 h-6 text-yellow-400" />
-              <h2 className="text-xl font-bold text-white">Connect to Dropbox</h2>
-            </div>
-            <button
-              onClick={handleClose}
-              className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-gray-400" />
-            </button>
-          </div>
+  // ── browser ───────────────────────────────────────────────────────────────
+  const filtered = entries.filter(
+    (entry) =>
+      entry.name.toLowerCase().includes(search.toLowerCase()) ||
+      entry.path.toLowerCase().includes(search.toLowerCase())
+  );
 
-          <div className="text-center py-6">
-            <FolderIcon className="w-16 h-16 text-gray-500 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-white mb-2">
-              {dropboxError?.includes('expired') ? 'Dropbox Session Expired' : 'Connect to Dropbox'}
-            </h3>
-            <p className="text-gray-400 mb-4">
-              {dropboxError ? dropboxError : 'Connect your Dropbox account to browse and sync folders.'}
-            </p>
-            <p className="text-sm text-gray-500 mb-6">
-              {dropboxError?.includes('expired') 
-                ? 'Your session has expired. Please reconnect to continue.' 
-                : 'This will open Dropbox authentication in a new tab.'}
-            </p>
-            
-            <div className="flex space-x-3">
-              <button
-                onClick={handleClose}
-                className="flex-1 px-4 py-2 text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRetry}
-                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-              >
-                Retry
-              </button>
-              <button
-                onClick={handleConnect}
-                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
-              >
-                Connect Dropbox
-              </button>
-            </div>
-            
-            <div className="mt-4 pt-4 border-t border-gray-700 space-y-2">
-              <button
-                onClick={handleTestAuth}
-                className="w-full px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors text-sm"
-              >
-                🔧 Test Auth URL (Debug)
-              </button>
-              <button
-                onClick={handleManualCallback}
-                className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm"
-              >
-                🔗 Manual Callback (Paste URL)
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const crumbs = path ? ['Home', ...path.split('/').filter(Boolean)] : ['Home'];
+
+  const goToCrumb = (index: number) => {
+    if (index === 0) {
+      browse('');
+      return;
+    }
+    browse(`/${path.split('/').filter(Boolean).slice(0, index).join('/')}`);
+  };
+
+  const describe = (entry: DropboxEntry): string => {
+    const stat = stats[entry.path];
+    if (!stat || stat === 'loading') return 'COUNTING…';
+    const parts = [stat.trackCount > 0 ? `${stat.trackCount} TRACKS` : 'NO TRACKS'];
+    if (stat.hasSubfolders) parts.push('HAS SUBFOLDERS');
+    if (search) parts.push(entry.path);
+    return parts.join(' · ');
+  };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className={`bg-gray-800 rounded-xl p-6 w-full flex flex-col transition-all duration-300 ${
-        isExpanded ? 'max-w-7xl max-h-[95vh]' : 'max-w-4xl max-h-[80vh]'
-      }`}>
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-3">
-            <FolderIcon className="w-6 h-6 text-yellow-400" />
-            <h2 className="text-xl font-bold text-white">Browse Dropbox Folders</h2>
+    <Modal isOpen onClose={close} title="Browse Dropbox" kicker="Folder sync" width={720}>
+      {selected && (
+        <div className="nc-notice" style={{ marginBottom: 14 }}>
+          <Icon name="folder" size={16} color="var(--nc-accent-text)" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="nc-truncate" style={{ fontSize: 13.5, fontWeight: 500 }}>
+              {selected.name}
+            </div>
+            <div className="nc-truncate nc-mono" style={{ fontSize: 11.5, color: 'var(--nc-dim)' }}>
+              {selected.path}
+            </div>
           </div>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
-              title={isExpanded ? "Minimize" : "Expand"}
-            >
-              {isExpanded ? (
-                <Minimize2 className="w-5 h-5 text-gray-400" />
-              ) : (
-                <Maximize2 className="w-5 h-5 text-gray-400" />
-              )}
-            </button>
-            <button
-              onClick={handleClose}
-              className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-gray-400" />
-            </button>
-          </div>
+          <button
+            className="nc-btn nc-btn-ghost nc-btn-icon"
+            style={{ width: 26, height: 26 }}
+            onClick={() => setSelected(null)}
+            aria-label="Clear selection"
+          >
+            <Icon name="x" size={13} />
+          </button>
         </div>
+      )}
 
-        <div className="flex-1 flex flex-col space-y-6 overflow-hidden">
-          {/* Selected folder display */}
-          {selectedFolder && (
-            <div className="bg-blue-900/20 p-4 rounded-lg border border-blue-500/30">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <FolderIcon className="w-5 h-5 text-yellow-400" />
-                  <div>
-                    <h3 className="font-medium text-white">{selectedFolder.name}</h3>
-                    <p className="text-sm text-gray-400">{selectedFolder.path}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setSelectedFolder(null)}
-                  className="text-gray-400 hover:text-white"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Search Bar */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Search folders..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-gray-700/50 border border-gray-600 rounded-lg pl-10 pr-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-yellow-500"
-            />
-          </div>
-
-          {/* Breadcrumb Navigation */}
-          {!searchQuery && (
-            <div className="flex items-center space-x-2 text-sm">
-              {getBreadcrumbs().map((crumb, index) => (
-                <React.Fragment key={index}>
-                  {index > 0 && <ChevronRight className="w-4 h-4 text-gray-500" />}
-                  <button
-                    onClick={() => navigateToBreadcrumb(index)}
-                    className={`flex items-center space-x-1 px-2 py-1 rounded transition-colors ${
-                      index === getBreadcrumbs().length - 1
-                        ? 'text-yellow-400 bg-yellow-500/10'
-                        : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
-                    }`}
-                  >
-                    {index === 0 && <Home className="w-3 h-3" />}
-                    <span>{crumb}</span>
-                  </button>
-                </React.Fragment>
-              ))}
-            </div>
-          )}
-
-          {/* Back Button */}
-          {managementPath && !searchQuery && (
-            <button
-              onClick={navigateManagementBack}
-              className="flex items-center space-x-2 text-gray-400 hover:text-white transition-colors w-fit"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span>Back</span>
-            </button>
-          )}
-
-          {/* Folders List */}
-          <div className="flex-1 overflow-y-auto">
-            {filteredFolders.length === 0 ? (
-              <div className="text-center py-8">
-                <FolderIcon className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-400">
-                  {searchQuery ? 'No folders found matching your search' : 'No folders in this location'}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {filteredFolders.map((folder) => {
-                  const isSelected = selectedFolder?.id === folder.id;
-                  
-                  return (
-                    <div
-                      key={folder.id}
-                      className={`group flex items-center justify-between p-4 rounded-lg border cursor-pointer transition-all duration-200 ${
-                        isSelected
-                          ? 'bg-yellow-500/20 border-yellow-500/50'
-                          : 'bg-gray-700/50 border-gray-600 hover:bg-gray-600/50'
-                      }`}
-                      onClick={() => handleFolderSelect(folder)}
-                      onDoubleClick={() => handleFolderDoubleClick(folder)}
-                    >
-                      <div className="flex items-center space-x-3 flex-1 min-w-0">
-                        <div className="flex-shrink-0">
-                          {folder.hasSubfolders ? (
-                            <FolderIcon className="w-5 h-5 text-yellow-400" />
-                          ) : (
-                            <Music className="w-5 h-5 text-blue-400" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-medium text-white truncate">{folder.name}</h3>
-                          <div className="flex items-center space-x-2 text-sm text-gray-400">
-                            <span>
-                              {(folder.trackCount === 0 && folder.hasSubfolders === true) || folder.trackCount === undefined
-                                ? (
-                                  <span className="flex items-center space-x-1">
-                                    <div className="w-3 h-3 animate-spin rounded-full border border-t-transparent border-gray-400"></div>
-                                    <span>Loading...</span>
-                                  </span>
-                                )
-                                : folder.trackCount > 0 
-                                  ? `${folder.trackCount} tracks` 
-                                  : 'No tracks'
-                              }
-                            </span>
-                            {folder.hasSubfolders && folder.trackCount !== 0 && (
-                              <span className="text-yellow-400">• Has subfolders</span>
-                            )}
-                          </div>
-                          {searchQuery && (
-                            <p className="text-xs text-gray-500 truncate mt-1">{folder.path}</p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center space-x-3">
-                        {folder.hasSubfolders && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigateToManagementFolder(folder.path);
-                            }}
-                            className="p-1 text-gray-400 hover:text-white transition-colors"
-                            title="Browse folder"
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        )}
-
-                        {/* Selection indicator */}
-                        <div
-                          className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${
-                            isSelected
-                              ? 'bg-yellow-600 border-yellow-600'
-                              : 'border-gray-600'
-                          }`}
-                        >
-                          {isSelected && <Check className="w-4 h-4 text-white" />}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Configuration */}
-          <div className="border-t border-gray-700 pt-4">
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Sync Frequency
-              </label>
-              <select
-                value={syncFrequency}
-                onChange={(e) => setSyncFrequency(e.target.value)}
-                className="w-full bg-gray-700/50 text-white px-4 py-2 rounded-lg border border-gray-600 focus:border-yellow-500 focus:outline-none"
-              >
-                <option value="manual">Manual</option>
-                <option value="hourly">Every Hour</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-              </select>
-            </div>
-
-            {error && (
-              <div className="p-3 bg-red-900/50 text-red-300 rounded-lg text-sm mb-4">
-                {error}
-              </div>
-            )}
-
-            {/* Action Buttons */}
-            <div className="flex space-x-3">
-              <button
-                onClick={handleClose}
-                className="flex-1 px-4 py-2 text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={loading || !selectedFolder}
-                className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white rounded-lg transition-colors"
-              >
-                {loading ? 'Adding...' : `Add "${selectedFolder?.name || 'Folder'}"`}
-              </button>
-            </div>
-          </div>
-        </div>
+      <div className="nc-search" style={{ height: 38, marginBottom: 14 }}>
+        <Icon name="search" size={14} color="var(--nc-mut)" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search folders"
+          aria-label="Search folders"
+        />
       </div>
-    </div>
+
+      {!search && (
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}
+        >
+          {path && (
+            <button
+              className="nc-btn nc-btn-ghost nc-btn-icon"
+              style={{ width: 26, height: 26, marginRight: 4 }}
+              onClick={() => browse(path.split('/').slice(0, -1).join('/'))}
+              aria-label="Up one level"
+            >
+              <Icon name="arrowLeft" size={14} />
+            </button>
+          )}
+          {crumbs.map((crumb, index) => (
+            <React.Fragment key={`${crumb}-${index}`}>
+              {index > 0 && <Icon name="caretRight" size={12} color="var(--nc-faint)" />}
+              <button
+                onClick={() => goToCrumb(index)}
+                className="nc-mono"
+                style={{
+                  padding: '3px 7px',
+                  borderRadius: 6,
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 11.5,
+                  cursor: 'pointer',
+                  color:
+                    index === crumbs.length - 1 ? 'var(--nc-accent-text-bright)' : 'var(--nc-mut)',
+                }}
+              >
+                {crumb}
+              </button>
+            </React.Fragment>
+          ))}
+          {browsing && (
+            <Icon
+              name="refresh"
+              size={13}
+              color="var(--nc-dim)"
+              style={{ animation: 'ms-spin 0.8s linear infinite', marginLeft: 6 }}
+            />
+          )}
+        </div>
+      )}
+
+      <div
+        className="nc-scroll"
+        style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, paddingRight: 4 }}
+      >
+        {filtered.length === 0 ? (
+          <p style={{ padding: '24px 0', fontSize: 13, color: 'var(--nc-mut)', textAlign: 'center' }}>
+            {browsing
+              ? 'Loading…'
+              : search
+                ? 'No folders match that search.'
+                : 'No folders in this location.'}
+          </p>
+        ) : (
+          filtered.map((entry) => {
+            const stat = stats[entry.path];
+            const hasSubfolders = stat && stat !== 'loading' ? stat.hasSubfolders : false;
+
+            return (
+              <button
+                key={entry.id || entry.path}
+                type="button"
+                className="nc-pick"
+                aria-pressed={selected?.path === entry.path}
+                onClick={() => setSelected(entry)}
+                onDoubleClick={() => hasSubfolders && browse(entry.path)}
+              >
+                <Icon
+                  name="folder"
+                  size={16}
+                  color={hasSubfolders ? 'var(--nc-accent-text)' : 'var(--nc-mut)'}
+                />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span
+                    className="nc-truncate"
+                    style={{ display: 'block', fontSize: 13.5, fontWeight: 500 }}
+                  >
+                    {entry.name}
+                  </span>
+                  <span
+                    className="nc-truncate nc-mono"
+                    style={{ display: 'block', fontSize: 11, color: 'var(--nc-dim)' }}
+                  >
+                    {describe(entry)}
+                  </span>
+                </span>
+
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    browse(entry.path);
+                  }}
+                  title="Open folder"
+                  style={{ color: 'var(--nc-mut)', display: 'flex', padding: 2 }}
+                >
+                  <Icon name="caretRight" size={14} />
+                </span>
+
+                <span className="nc-pick-tick">
+                  <Icon name="check" size={11} />
+                </span>
+              </button>
+            );
+          })
+        )}
+      </div>
+
+      <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--nc-line)' }}>
+        <div className="nc-field" style={{ marginBottom: 14 }}>
+          <label className="nc-label" htmlFor="af-frequency">
+            Sync frequency
+          </label>
+          <select
+            id="af-frequency"
+            className="nc-select"
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value)}
+          >
+            <option value="manual">Manual</option>
+            <option value="hourly">Every hour</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+          </select>
+        </div>
+
+        <FormError message={error} />
+
+        <DialogActions
+          onCancel={close}
+          onConfirm={submit}
+          confirmLabel={selected ? `Watch “${selected.name}”` : 'Add folder'}
+          busy={saving}
+          disabled={!selected}
+        />
+      </div>
+    </Modal>
   );
 };

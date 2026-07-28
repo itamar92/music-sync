@@ -1,702 +1,510 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Play, Edit3, Save, X, GripVertical, Pause, Trash2, RefreshCw } from 'lucide-react';
-import { doc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { useOptionalUser } from '../../hooks/useOptionalUser';
-import { db } from '../../services/firebase';
-import { dropboxService } from '../../services/dropboxService';
-import { cachedTrackService } from '../../services/cachedTrackService';
-import { publicDataService } from '../../services/publicDataService';
-import { isServerMode } from '../../services/dataMode';
+import React, { useEffect, useState } from 'react';
+import { usePlaylistTracks } from '../../hooks/usePlaylistTracks';
+import { useAudioPlayerContext } from '../../context/AudioPlayerContext';
+import { adminData } from '../../services/adminData';
+import { calculatePlaylistDuration, formatTime } from '../../utils/formatTime';
 import { Track } from '../../types';
-import { generatePlaylistCover } from '../../utils/generateCover';
+import { Waveform } from '../nocturne/Waveform';
+import { EqBars } from '../nocturne/EqBars';
+import { Icon } from '../nocturne/icons';
+import { PlaylistRecord } from '../admin/types';
+
+/**
+ * The playlist editor.
+ *
+ * Read-only it's a listening view; for an owner it adds inline renaming of the
+ * playlist, artist and each track, drag-to-reorder, track removal, and a cache
+ * refresh. All of those write straight to Firestore, exactly as before — only
+ * the presentation and the track loading (now a shared hook) have changed.
+ */
 
 interface PlaylistViewProps {
-  playlist: any;
+  playlist: PlaylistRecord;
   onBack: () => void;
-  onPlaylistUpdated?: (updatedPlaylist: any) => void;
-  isReadOnly?: boolean; // For public view
+  onPlaylistUpdated?: (updated: PlaylistRecord) => void;
+  isReadOnly?: boolean;
 }
 
 export const PlaylistView: React.FC<PlaylistViewProps> = ({
   playlist,
   onBack,
   onPlaylistUpdated,
-  isReadOnly = false
+  isReadOnly = false,
 }) => {
-  const [user] = useOptionalUser();
-  const [playlistTracks, setPlaylistTracks] = useState<Track[]>([]);
-  const [loadingTracks, setLoadingTracks] = useState(false);
+  const { tracks, loading, reload, setTracks } = usePlaylistTracks(playlist, {
+    admin: !isReadOnly,
+  });
+  const { state, playFromPlaylist, togglePlayPause, progress, seekToFraction } =
+    useAudioPlayerContext();
+
+  const [title, setTitle] = useState(playlist.displayName || playlist.name);
+  const [artist, setArtist] = useState(playlist.artist || 'Unknown Artist');
   const [editingTitle, setEditingTitle] = useState(false);
   const [editingArtist, setEditingArtist] = useState(false);
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
-  const [playlistTitle, setPlaylistTitle] = useState(playlist.displayName || playlist.name);
-  const [artistName, setArtistName] = useState(playlist.artist || 'Unknown Artist');
   const [editingTrackName, setEditingTrackName] = useState('');
-  const [draggedTrack, setDraggedTrack] = useState<number | null>(null);
-  const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    loadPlaylistTracks();
+    setTitle(playlist.displayName || playlist.name);
+    setArtist(playlist.artist || 'Unknown Artist');
   }, [playlist]);
 
-  const loadPlaylistTracks = async () => {
-    setLoadingTracks(true);
-    
+  const canEdit = !isReadOnly && Boolean(onPlaylistUpdated);
+
+  /** Wraps a write so a failure is reported once, in one voice. */
+  const attempt = async (write: () => Promise<unknown>, failure: string) => {
+    if (!canEdit) return false;
     try {
-      if (isServerMode) {
-        const tracks = await publicDataService.getPlaylistTracks(playlist.id);
-        setPlaylistTracks(tracks);
-        // Warm the stream-link cache for the first few tracks so playback
-        // starts instantly when the user hits play.
-        publicDataService.prefetchStreamUrls(
-          tracks.slice(0, 5).map((t) => t.path || t.filePath || '').filter(Boolean)
-        );
-        return;
-      }
-
-      if (!playlist.folderIds || playlist.folderIds.length === 0) {
-        setPlaylistTracks([]);
-        return;
-      }
-
-      // Load tracks from all folders in parallel using cached service
-      const trackPromises = playlist.folderIds.map(async (folderId: string) => {
-        try {
-          // Get folder details first
-          const foldersRef = collection(db, 'folderSyncs');
-          const folderQuery = query(foldersRef, where('__name__', '==', folderId));
-          const folderSnapshot = await getDocs(folderQuery);
-          
-          if (folderSnapshot.empty) {
-            console.warn(`Folder ${folderId} not found`);
-            return [];
-          }
-
-          const folderData = folderSnapshot.docs[0].data();
-          
-          // Use cached track service for both authenticated and anonymous users
-          const userId = user?.uid || null;
-          if (userId) {
-            console.log('Loading tracks with user authentication:', userId);
-          } else {
-            console.log('Loading tracks for anonymous user with public token access');
-          }
-          return await cachedTrackService.getTracksFromFolder(userId, folderId, folderData.dropboxPath);
-        } catch (error) {
-          console.error(`Error loading tracks from folder ${folderId}:`, error);
-          return [];
-        }
-      });
-
-      const trackArrays = await Promise.all(trackPromises);
-      let allTracks = trackArrays.flat();
-      
-      // Apply saved track order if exists
-      if (playlist.trackOrder) {
-        const orderedTracks = [];
-        const trackMap = new Map(allTracks.map(track => [track.id, track]));
-        
-        for (const trackId of playlist.trackOrder) {
-          const track = trackMap.get(trackId);
-          if (track) {
-            orderedTracks.push(track);
-            trackMap.delete(trackId);
-          }
-        }
-        
-        // Add any new tracks that aren't in the saved order
-        orderedTracks.push(...Array.from(trackMap.values()));
-        allTracks = orderedTracks;
-      }
-
-      // Apply saved track names if exists
-      if (playlist.trackNames) {
-        allTracks = allTracks.map(track => ({
-          ...track,
-          name: playlist.trackNames[track.id] || track.name
-        }));
-      }
-
-      // Filter out excluded tracks
-      if (playlist.excludedTracks) {
-        allTracks = allTracks.filter(track => !playlist.excludedTracks.includes(track.id));
-      }
-      
-      setPlaylistTracks(allTracks);
-      
-      // Only show error if no tracks were loaded at all
-      if (allTracks.length === 0 && !dropboxService.isAuthenticated() && !user) {
-        console.warn('No cached tracks available and Dropbox not connected');
-      }
+      await write();
+      return true;
     } catch (error) {
-      console.error('Error loading playlist tracks:', error);
-      // Only show alert if no tracks were loaded
-      if (playlistTracks.length === 0) {
-        alert('Failed to load playlist contents. Please try again or connect to Dropbox.');
-      }
-    } finally {
-      setLoadingTracks(false);
+      console.error(failure, error);
+      alert(`${failure} Please try again.`);
+      return false;
     }
   };
 
-  const handleRefreshCache = async () => {
-    if (!user || !playlist.folderIds || playlist.folderIds.length === 0) return;
-    
-    setIsRefreshing(true);
-    try {
-      // Refresh cache for all folders in the playlist
-      const refreshPromises = playlist.folderIds.map(async (folderId: string) => {
-        try {
-          // Get folder details first
-          const foldersRef = collection(db, 'folderSyncs');
-          const folderQuery = query(foldersRef, where('__name__', '==', folderId));
-          const folderSnapshot = await getDocs(folderQuery);
-          
-          if (folderSnapshot.empty) {
-            console.warn(`Folder ${folderId} not found`);
-            return [];
-          }
-
-          const folderData = folderSnapshot.docs[0].data();
-          return await cachedTrackService.refreshFolderCache(user.uid, folderId, folderData.dropboxPath);
-        } catch (error) {
-          console.error(`Error refreshing cache for folder ${folderId}:`, error);
-          return [];
-        }
-      });
-
-      const refreshedTrackArrays = await Promise.all(refreshPromises);
-      let allTracks = refreshedTrackArrays.flat();
-      
-      // Apply saved track order if exists
-      if (playlist.trackOrder) {
-        const orderedTracks = [];
-        const trackMap = new Map(allTracks.map(track => [track.id, track]));
-        
-        for (const trackId of playlist.trackOrder) {
-          if (trackMap.has(trackId)) {
-            orderedTracks.push(trackMap.get(trackId)!);
-            trackMap.delete(trackId);
-          }
-        }
-        
-        // Add any remaining tracks that weren't in the order
-        orderedTracks.push(...Array.from(trackMap.values()));
-        allTracks = orderedTracks;
-      }
-      
-      setPlaylistTracks(allTracks);
-      console.log(`Cache refreshed: ${allTracks.length} tracks loaded`);
-    } catch (error) {
-      console.error('Error refreshing cache:', error);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  // Listen for duration updates
-  useEffect(() => {
-    const handleDurationUpdates = (event: CustomEvent) => {
-      if (event.detail?.tracks) {
-        setPlaylistTracks(prev => {
-          const trackMap = new Map(event.detail.tracks.map((t: Track) => [t.id, t]));
-          return prev.map(track => {
-            const updatedTrack = trackMap.get(track.id);
-            return updatedTrack || track;
-          });
-        });
-      }
-    };
-
-    window.addEventListener('trackDurationsUpdated', handleDurationUpdates as EventListener);
-    
-    return () => {
-      window.removeEventListener('trackDurationsUpdated', handleDurationUpdates as EventListener);
-    };
-  }, []);
-
-  // Listen for audio player events
-  useEffect(() => {
-    const handleAudioPlayerState = (event: CustomEvent) => {
-      const { currentTrack, isPlaying } = event.detail;
-      if (currentTrack) {
-        setCurrentlyPlaying(isPlaying ? currentTrack.id : null);
-      }
-    };
-
-    window.addEventListener('audioPlayerStateChanged', handleAudioPlayerState as EventListener);
-    
-    return () => {
-      window.removeEventListener('audioPlayerStateChanged', handleAudioPlayerState as EventListener);
-    };
-  }, []);
-
-  const calculateTotalDuration = () => {
-    const totalSeconds = playlistTracks.reduce((sum, track) => sum + (track.durationSeconds || 0), 0);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = Math.floor(totalSeconds % 60);
-    
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${seconds}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${seconds}s`;
-    } else {
-      return `${seconds}s`;
-    }
-  };
-
-  const handleSaveTitle = async () => {
-    if (isReadOnly || !onPlaylistUpdated) return;
-    
-    try {
-      const playlistRef = doc(db, 'playlists', playlist.id);
-      const updatedPlaylist = {
-        ...playlist,
-        displayName: playlistTitle,
-        updatedAt: new Date()
-      };
-      
-      await updateDoc(playlistRef, {
-        displayName: playlistTitle,
-        updatedAt: new Date()
-      });
-      
-      onPlaylistUpdated(updatedPlaylist);
+  const saveTitle = async () => {
+    const ok = await attempt(
+      () => adminData.updatePlaylist(playlist.id, { displayName: title }),
+      'Failed to update playlist title.'
+    );
+    if (ok) {
+      onPlaylistUpdated?.({ ...playlist, displayName: title });
       setEditingTitle(false);
-    } catch (error) {
-      console.error('Error updating playlist title:', error);
-      alert('Failed to update playlist title. Please try again.');
     }
   };
 
-  const handleSaveArtist = async () => {
-    if (isReadOnly || !onPlaylistUpdated) return;
-    
-    try {
-      const playlistRef = doc(db, 'playlists', playlist.id);
-      const updatedPlaylist = {
-        ...playlist,
-        artist: artistName,
-        updatedAt: new Date()
-      };
-      
-      await updateDoc(playlistRef, {
-        artist: artistName,
-        updatedAt: new Date()
-      });
-      
-      onPlaylistUpdated(updatedPlaylist);
+  const saveArtist = async () => {
+    const ok = await attempt(
+      () => adminData.updatePlaylist(playlist.id, { artist }),
+      'Failed to update artist name.'
+    );
+    if (ok) {
+      onPlaylistUpdated?.({ ...playlist, artist });
       setEditingArtist(false);
-    } catch (error) {
-      console.error('Error updating artist name:', error);
-      alert('Failed to update artist name. Please try again.');
     }
   };
 
-  const handleSaveTrackName = async (trackId: string) => {
-    if (isReadOnly || !onPlaylistUpdated) return;
-    
-    try {
-      const playlistRef = doc(db, 'playlists', playlist.id);
-      const updatedTrackNames = {
-        ...playlist.trackNames,
-        [trackId]: editingTrackName
-      };
-      
-      await updateDoc(playlistRef, {
-        trackNames: updatedTrackNames,
-        updatedAt: new Date()
-      });
-      
-      // Update local state
-      setPlaylistTracks(prev => prev.map(track => 
-        track.id === trackId ? { ...track, name: editingTrackName } : track
-      ));
-      
-      const updatedPlaylist = {
-        ...playlist,
-        trackNames: updatedTrackNames,
-        updatedAt: new Date()
-      };
-      
-      onPlaylistUpdated(updatedPlaylist);
+  const saveTrackName = async (trackId: string) => {
+    const ok = await attempt(
+      () => adminData.renameTrack(playlist.id, trackId, editingTrackName),
+      'Failed to update track name.'
+    );
+    if (ok) {
+      setTracks((prev) =>
+        prev.map((track) => (track.id === trackId ? { ...track, name: editingTrackName } : track))
+      );
       setEditingTrackId(null);
       setEditingTrackName('');
-    } catch (error) {
-      console.error('Error updating track name:', error);
-      alert('Failed to update track name. Please try again.');
     }
   };
 
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-    if (isReadOnly) return;
-    setDraggedTrack(index);
-    e.dataTransfer.effectAllowed = 'move';
+  const removeTrack = async (trackId: string) => {
+    if (!confirm('Remove this track from the playlist? The Dropbox file is untouched.')) return;
+
+    const ok = await attempt(
+      () => adminData.removeTrack(playlist.id, trackId),
+      'Failed to remove track.'
+    );
+    if (ok) setTracks((prev) => prev.filter((track) => track.id !== trackId));
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    if (isReadOnly) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
-    if (isReadOnly || !onPlaylistUpdated) return;
-    
-    e.preventDefault();
-    
-    if (draggedTrack === null || draggedTrack === dropIndex) {
-      setDraggedTrack(null);
+  const drop = async (dropIndex: number) => {
+    if (!canEdit || dragIndex === null || dragIndex === dropIndex) {
+      setDragIndex(null);
       return;
     }
 
-    const newTracks = [...playlistTracks];
-    const draggedItem = newTracks[draggedTrack];
-    newTracks.splice(draggedTrack, 1);
-    newTracks.splice(dropIndex, 0, draggedItem);
+    const reordered = [...tracks];
+    const [moved] = reordered.splice(dragIndex, 1);
+    reordered.splice(dropIndex, 0, moved);
 
-    setPlaylistTracks(newTracks);
-    setDraggedTrack(null);
+    // Optimistic: the list settles immediately, the write follows.
+    setTracks(reordered);
+    setDragIndex(null);
+    await attempt(
+      () => adminData.setTrackOrder(playlist.id, reordered.map((track) => track.id)),
+      'Failed to save track order.'
+    );
+  };
 
-    // Save new order to database
+  const refresh = async () => {
+    setRefreshing(true);
     try {
-      const trackOrder = newTracks.map(track => track.id);
-      const playlistRef = doc(db, 'playlists', playlist.id);
-      
-      await updateDoc(playlistRef, {
-        trackOrder,
-        updatedAt: new Date()
-      });
-      
-      const updatedPlaylist = {
-        ...playlist,
-        trackOrder,
-        updatedAt: new Date()
-      };
-      
-      onPlaylistUpdated(updatedPlaylist);
-    } catch (error) {
-      console.error('Error saving track order:', error);
-      alert('Failed to save track order. Please try again.');
+      await reload(true);
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  const handlePlayTrack = async (track: Track) => {
-    try {
-      if (currentlyPlaying === track.id) {
-        // Pause current track
-        setCurrentlyPlaying(null);
-        window.dispatchEvent(new CustomEvent('pauseTrack'));
-        return;
-      }
-
-      setCurrentlyPlaying(track.id);
-      
-      // Emit event to play track with the full playlist
-      window.dispatchEvent(new CustomEvent('playTrackFromPlaylist', { 
-        detail: { 
-          track, 
-          playlist: playlistTracks,
-          index: playlistTracks.findIndex(t => t.id === track.id)
-        } 
-      }));
-    } catch (error) {
-      console.error('Error playing track:', error);
-      alert('Failed to play track. Please try again.');
-    }
-  };
-
-  const handleRemoveTrack = async (trackId: string) => {
-    if (isReadOnly || !onPlaylistUpdated) return;
-    
-    if (!confirm('Are you sure you want to remove this track from the playlist?')) {
-      return;
-    }
-
-    try {
-      // Create a list of excluded tracks
-      const excludedTracks = playlist.excludedTracks || [];
-      excludedTracks.push(trackId);
-      
-      const playlistRef = doc(db, 'playlists', playlist.id);
-      await updateDoc(playlistRef, {
-        excludedTracks,
-        updatedAt: new Date()
-      });
-
-      // Remove from local state
-      setPlaylistTracks(prev => prev.filter(track => track.id !== trackId));
-      
-      const updatedPlaylist = {
-        ...playlist,
-        excludedTracks,
-        updatedAt: new Date()
-      };
-      
-      onPlaylistUpdated(updatedPlaylist);
-    } catch (error) {
-      console.error('Error removing track:', error);
-      alert('Failed to remove track. Please try again.');
-    }
-  };
+  const play = (index: number) =>
+    playFromPlaylist(tracks, index, { playlistId: playlist.id, playlistName: title });
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <button
-            onClick={onBack}
-            className="flex items-center space-x-2 text-gray-400 hover:text-white transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            <span>Back</span>
-          </button>
-        </div>
-        
-        {/* Refresh Cache Button */}
-        {!isReadOnly && user && (
-          <button
-            onClick={handleRefreshCache}
-            disabled={isRefreshing || loadingTracks}
-            className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg transition-colors"
-            title="Refresh cache from Dropbox"
-          >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span>{isRefreshing ? 'Syncing...' : 'Sync'}</span>
+    <div style={{ maxWidth: 1180 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 20,
+        }}
+      >
+        <button className="nc-link" onClick={onBack}>
+          <Icon name="arrowLeft" size={15} />
+          Back
+        </button>
+
+        {canEdit && (
+          <button className="nc-btn" onClick={refresh} disabled={refreshing || loading}>
+            <Icon
+              name="refresh"
+              size={14}
+              style={refreshing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
+            />
+            {refreshing ? 'Syncing…' : 'Sync from Dropbox'}
           </button>
         )}
       </div>
 
-      {/* Playlist Header */}
-      <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl border border-gray-700/50 p-4 sm:p-8">
-        <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6">
-          <div className="w-32 h-32 sm:w-48 sm:h-48 rounded-lg overflow-hidden flex-shrink-0">
-            {playlist.coverImageUrl ? (
-              <img 
-                src={playlist.coverImageUrl} 
-                alt={playlistTitle} 
-                className="w-full h-full object-cover" 
-              />
-            ) : (
-              <img 
-                src={generatePlaylistCover(playlistTitle || playlist.name, 192)} 
-                alt={playlistTitle || playlist.name} 
-                className="w-full h-full object-cover" 
-              />
-            )}
+      <div style={{ display: 'flex', gap: 26, alignItems: 'flex-end', marginBottom: 28 }}>
+        <div
+          className="nc-art"
+          style={{ width: 168, height: 168, borderRadius: 12, boxShadow: 'var(--nc-shadow-md)' }}
+        >
+          {playlist.coverImageUrl ? (
+            <img
+              src={playlist.coverImageUrl}
+              alt=""
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+              <Waveform seed={playlist.id + playlist.name} kind="cover" height={78} />
+            </div>
+          )}
+        </div>
+
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="nc-kicker" style={{ marginBottom: 10 }}>
+            Playlist
           </div>
-          
-          <div className="flex-1 text-center sm:text-left">
-            <div className="mb-2">
-              {editingTitle && !isReadOnly ? (
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="text"
-                    value={playlistTitle}
-                    onChange={(e) => setPlaylistTitle(e.target.value)}
-                    className="text-2xl sm:text-5xl font-bold text-white bg-transparent border-b border-white/50 focus:border-white focus:outline-none w-full max-w-full"
-                    autoFocus
-                  />
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={handleSaveTitle}
-                      className="p-2 text-green-400 hover:text-green-300"
-                    >
-                      <Save className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingTitle(false);
-                        setPlaylistTitle(playlist.displayName || playlist.name);
-                      }}
-                      className="p-2 text-red-400 hover:text-red-300"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center sm:justify-start space-x-2">
-                  <h1 className="text-2xl sm:text-5xl font-bold text-white break-words">{playlistTitle}</h1>
-                  {!isReadOnly && (
-                    <button
-                      onClick={() => setEditingTitle(true)}
-                      className="p-2 text-gray-400 hover:text-white flex-shrink-0"
-                    >
-                      <Edit3 className="w-5 h-5" />
-                    </button>
-                  )}
-                </div>
+
+          {editingTitle ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <input
+                className="nc-input"
+                style={{ fontSize: 20, height: 44 }}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && saveTitle()}
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+              />
+              <button className="nc-btn nc-btn-accent nc-btn-icon" onClick={saveTitle} title="Save">
+                <Icon name="check" size={15} />
+              </button>
+              <button
+                className="nc-btn nc-btn-icon"
+                onClick={() => {
+                  setEditingTitle(false);
+                  setTitle(playlist.displayName || playlist.name);
+                }}
+                title="Cancel"
+              >
+                <Icon name="x" size={15} />
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
+              <h1 className="nc-h1" style={{ fontSize: 38 }}>
+                {title}
+              </h1>
+              {canEdit && (
+                <button
+                  className="nc-btn nc-btn-ghost nc-btn-icon"
+                  onClick={() => setEditingTitle(true)}
+                  aria-label="Rename playlist"
+                >
+                  <Icon name="pencil" size={15} />
+                </button>
               )}
             </div>
-            
-            <div className="mb-4">
-              {editingArtist && !isReadOnly ? (
-                <div className="flex items-center justify-center sm:justify-start space-x-2">
-                  <input
-                    type="text"
-                    value={artistName}
-                    onChange={(e) => setArtistName(e.target.value)}
-                    className="text-lg sm:text-xl text-gray-300 bg-transparent border-b border-gray-500 focus:border-white focus:outline-none w-full max-w-full"
-                    autoFocus
-                  />
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={handleSaveArtist}
-                      className="p-1 text-green-400 hover:text-green-300"
-                    >
-                      <Save className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingArtist(false);
-                        setArtistName(playlist.artist || 'Unknown Artist');
-                      }}
-                      className="p-1 text-red-400 hover:text-red-300"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center sm:justify-start space-x-2">
-                  <p className="text-lg sm:text-xl text-gray-300 break-words">{artistName}</p>
-                  {!isReadOnly && (
-                    <button
-                      onClick={() => setEditingArtist(true)}
-                      className="p-1 text-gray-400 hover:text-white flex-shrink-0"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
+          )}
+
+          {editingArtist ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
+              <input
+                className="nc-input"
+                style={{ maxWidth: 320 }}
+                value={artist}
+                onChange={(e) => setArtist(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && saveArtist()}
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus
+              />
+              <button className="nc-btn nc-btn-accent nc-btn-icon" onClick={saveArtist} title="Save">
+                <Icon name="check" size={15} />
+              </button>
+              <button
+                className="nc-btn nc-btn-icon"
+                onClick={() => {
+                  setEditingArtist(false);
+                  setArtist(playlist.artist || 'Unknown Artist');
+                }}
+                title="Cancel"
+              >
+                <Icon name="x" size={15} />
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
+              <p style={{ margin: 0, fontSize: 14, color: 'var(--nc-mut)' }}>{artist}</p>
+              {canEdit && (
+                <button
+                  className="nc-btn nc-btn-ghost nc-btn-icon"
+                  style={{ width: 24, height: 24 }}
+                  onClick={() => setEditingArtist(true)}
+                  aria-label="Rename artist"
+                >
+                  <Icon name="pencil" size={13} />
+                </button>
               )}
             </div>
-            
-            <div className="text-gray-400">
-              {loadingTracks ? (
-                <p>Loading tracks...</p>
-              ) : (
-                <p>{playlistTracks.length} tracks • {calculateTotalDuration()}</p>
-              )}
-            </div>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <button
+              className="nc-btn nc-btn-play"
+              onClick={() => play(0)}
+              disabled={!tracks.length}
+            >
+              <Icon name="play" size={15} />
+              Play
+            </button>
+            <span className="nc-mono" style={{ fontSize: 11.5, color: 'var(--nc-dim)' }}>
+              {loading
+                ? 'LOADING…'
+                : `${tracks.length} TRACKS · ${calculatePlaylistDuration(tracks)}`}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Tracks List */}
-      <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl border border-gray-700/50">
-        <div className="p-6">
-          {loadingTracks ? (
-            <div className="text-center py-12">
-              <div className="w-8 h-8 animate-spin rounded-full border-t-2 border-b-2 border-green-500 mx-auto mb-4"></div>
-              <p className="text-gray-400">Loading tracks...</p>
-            </div>
-          ) : playlistTracks.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-gray-400">No tracks in this playlist</p>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {playlistTracks.map((track, index) => (
-                <div
-                  key={track.id}
-                  draggable={!isReadOnly}
-                  onDragStart={(e) => handleDragStart(e, index)}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, index)}
-                  className={`flex items-center p-3 rounded-lg hover:bg-gray-700/50 transition-colors group ${
-                    draggedTrack === index ? 'opacity-50' : ''
-                  }`}
+      <div
+        className="nc-mono"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: canEdit ? '44px 24px 1fr 1.1fr 74px 34px' : '44px 1fr 1.1fr 74px',
+          alignItems: 'center',
+          gap: 16,
+          padding: '0 14px 9px',
+          fontSize: 10.5,
+          letterSpacing: '0.12em',
+          color: 'var(--nc-dim)',
+          borderBottom: '1px solid var(--nc-line)',
+        }}
+      >
+        <span>#</span>
+        {canEdit && <span />}
+        <span>TITLE</span>
+        <span>WAVEFORM</span>
+        <span style={{ textAlign: 'right' }}>TIME</span>
+        {canEdit && <span />}
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 48, display: 'flex', justifyContent: 'center' }}>
+          <div className="nc-spinner" />
+        </div>
+      ) : tracks.length === 0 ? (
+        <p style={{ padding: '48px 14px', fontSize: 13.5, color: 'var(--nc-mut)' }}>
+          No tracks in this playlist.
+        </p>
+      ) : (
+        tracks.map((track, index) => {
+          const current = state.currentTrack?.id === track.id;
+          const playing = current && state.isPlaying;
+
+          return (
+            <div
+              key={track.id}
+              draggable={canEdit}
+              onDragStart={() => canEdit && setDragIndex(index)}
+              onDragOver={(e) => canEdit && e.preventDefault()}
+              onDrop={() => drop(index)}
+              className="nc-row-hover"
+              style={{
+                position: 'relative',
+                display: 'grid',
+                gridTemplateColumns: canEdit
+                  ? '44px 24px 1fr 1.1fr 74px 34px'
+                  : '44px 1fr 1.1fr 74px',
+                alignItems: 'center',
+                gap: 16,
+                padding: '11px 14px',
+                borderRadius: 9,
+                overflow: 'hidden',
+                opacity: dragIndex === index ? 0.5 : 1,
+              }}
+            >
+              {current && (
+                <>
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      background:
+                        'linear-gradient(90deg, rgba(34,184,214,0.10), rgba(61,13,96,0.06))',
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: 6,
+                      bottom: 6,
+                      width: 2,
+                      background: 'var(--nc-cy)',
+                      boxShadow: '0 0 10px var(--nc-cy)',
+                    }}
+                  />
+                </>
+              )}
+
+              <button
+                onClick={() => (current ? togglePlayPause() : play(index))}
+                aria-label={playing ? `Pause ${track.name}` : `Play ${track.name}`}
+                style={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 26,
+                  height: 26,
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                }}
+              >
+                <span
+                  className="nc-mono"
+                  style={{
+                    position: 'absolute',
+                    fontSize: 12,
+                    color: 'var(--nc-dim)',
+                    opacity: playing ? 0 : 1,
+                  }}
                 >
-                  <div className="flex items-center space-x-3 flex-1">
-                    {/* Track Number */}
-                    <div className="w-8 text-center">
-                      <span className="text-sm text-gray-400 font-mono">{(index + 1).toString().padStart(2, '0')}</span>
-                    </div>
-                    
-                    {!isReadOnly && (
-                      <GripVertical className="w-4 h-4 text-gray-500 cursor-move" />
-                    )}
-                    
+                  {String(index + 1).padStart(2, '0')}
+                </span>
+                <EqBars opacity={playing ? 1 : 0} />
+              </button>
+
+              {canEdit && (
+                <span
+                  style={{ position: 'relative', color: 'var(--nc-faint)', cursor: 'grab' }}
+                  title="Drag to reorder"
+                >
+                  <Icon name="grip" size={14} />
+                </span>
+              )}
+
+              <div style={{ position: 'relative', minWidth: 0 }}>
+                {editingTrackId === track.id ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      className="nc-input"
+                      style={{ height: 30, fontSize: 13 }}
+                      value={editingTrackName}
+                      onChange={(e) => setEditingTrackName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && saveTrackName(track.id)}
+                      // eslint-disable-next-line jsx-a11y/no-autofocus
+                      autoFocus
+                    />
                     <button
-                      onClick={() => handlePlayTrack(track)}
-                      className="w-8 h-8 bg-green-600/20 rounded-full flex items-center justify-center hover:bg-green-600 transition-colors"
+                      className="nc-btn nc-btn-accent nc-btn-icon"
+                      style={{ width: 26, height: 26 }}
+                      onClick={() => saveTrackName(track.id)}
+                      title="Save"
                     >
-                      {currentlyPlaying === track.id ? (
-                        <Pause className="w-4 h-4 text-white" />
-                      ) : (
-                        <Play className="w-4 h-4 text-green-400 hover:text-white" />
-                      )}
+                      <Icon name="check" size={13} />
                     </button>
-                    
-                    <div className="flex-1">
-                      {editingTrackId === track.id && !isReadOnly ? (
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="text"
-                            value={editingTrackName}
-                            onChange={(e) => setEditingTrackName(e.target.value)}
-                            className="text-white bg-transparent border-b border-gray-500 focus:border-white focus:outline-none"
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => handleSaveTrackName(track.id)}
-                            className="p-1 text-green-400 hover:text-green-300"
-                          >
-                            <Save className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingTrackId(null);
-                              setEditingTrackName('');
-                            }}
-                            className="p-1 text-red-400 hover:text-red-300"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center space-x-2">
-                          <span className="text-white">{track.name}</span>
-                          {!isReadOnly && (
-                            <button
-                              onClick={() => {
-                                setEditingTrackId(track.id);
-                                setEditingTrackName(track.name);
-                              }}
-                              className="p-1 text-gray-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              <Edit3 className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      className="nc-btn nc-btn-icon"
+                      style={{ width: 26, height: 26 }}
+                      onClick={() => {
+                        setEditingTrackId(null);
+                        setEditingTrackName('');
+                      }}
+                      title="Cancel"
+                    >
+                      <Icon name="x" size={13} />
+                    </button>
                   </div>
-                  
-                  <div className="flex items-center space-x-2 ml-4">
-                    {!isReadOnly && (
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <span className="nc-truncate" style={{ fontSize: 14 }}>
+                      {track.name}
+                    </span>
+                    {canEdit && (
                       <button
-                        onClick={() => handleRemoveTrack(track.id)}
-                        className="p-1 text-gray-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Remove from playlist"
+                        className="nc-btn nc-btn-ghost nc-btn-icon"
+                        style={{ width: 22, height: 22 }}
+                        onClick={() => {
+                          setEditingTrackId(track.id);
+                          setEditingTrackName(track.name);
+                        }}
+                        aria-label={`Rename ${track.name}`}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Icon name="pencil" size={12} />
                       </button>
                     )}
-                    <div className="text-sm text-gray-400">
-                      {track.duration}
-                    </div>
                   </div>
-                </div>
-              ))}
+                )}
+              </div>
+
+              <Waveform
+                seed={track.name}
+                kind="row"
+                progress={current ? progress : 0}
+                live={current}
+                height={30}
+                onSeek={(fraction) => (current ? seekToFraction(fraction) : play(index))}
+                ariaLabel={`Scrub ${track.name}`}
+                style={{ position: 'relative' }}
+              />
+
+              <span
+                className="nc-mono"
+                style={{
+                  position: 'relative',
+                  fontSize: 12,
+                  color: 'var(--nc-muted)',
+                  textAlign: 'right',
+                }}
+              >
+                {track.duration || formatTime((track as Track).durationSeconds || 0)}
+              </span>
+
+              {canEdit && (
+                <button
+                  className="nc-btn nc-btn-ghost nc-btn-icon"
+                  style={{ position: 'relative', width: 26, height: 26, color: 'var(--nc-faint)' }}
+                  onClick={() => removeTrack(track.id)}
+                  title="Remove from playlist"
+                >
+                  <Icon name="trash" size={14} />
+                </button>
+              )}
             </div>
-          )}
-        </div>
-      </div>
+          );
+        })
+      )}
     </div>
   );
 };
