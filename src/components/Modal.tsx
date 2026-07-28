@@ -1,36 +1,82 @@
-import React from 'react';
-import { X } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { Icon } from './nocturne/icons';
 
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
+  /** Small tracked-out label above the title. */
+  kicker?: string;
   children: React.ReactNode;
-  maxWidth?: string;
+  /** Dialog width in px; the design's default is a comfortable form width. */
+  width?: number;
 }
 
+/**
+ * The app's dialog: a panel at the top elevation, capped by the 2px spectrum
+ * seam that marks every Nocturne modal.
+ */
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
   onClose,
   title,
+  kicker,
   children,
-  maxWidth = 'max-w-2xl'
+  width = 560,
 }) => {
+  // Escape closes, and the page behind stops scrolling while the modal is up.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    const previousOverflow = document.body.style.overflow;
+
+    window.addEventListener('keydown', onKeyDown);
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className={`bg-gray-900 rounded-lg ${maxWidth} w-full mx-4 max-h-[80vh] overflow-y-auto`}>
-        <div className="flex items-center justify-between p-6 border-b border-gray-700">
-          <h3 className="text-2xl font-semibold text-white">{title}</h3>
-          <button
-            onClick={onClose}
-            className="p-1 text-gray-400 hover:text-white transition-colors"
-          >
-            <X className="w-6 h-6" />
+    <div className="nc-backdrop" onClick={onClose} role="presentation">
+      <div
+        className="nc-dialog"
+        style={{ maxWidth: width }}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="nc-dialog-seam" />
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 16,
+            padding: '22px 28px 0',
+          }}
+        >
+          <div>
+            {kicker && (
+              <div className="nc-kicker" style={{ fontSize: 10.5, marginBottom: 8 }}>
+                {kicker}
+              </div>
+            )}
+            <h2 className="nc-h2">{title}</h2>
+          </div>
+          <button className="nc-btn nc-btn-icon" onClick={onClose} aria-label="Close">
+            <Icon name="x" size={15} />
           </button>
         </div>
-        <div className="p-6">
+        <div className="nc-dialog-body" style={{ paddingTop: 20 }}>
           {children}
         </div>
       </div>
@@ -45,39 +91,16 @@ interface ShareModalProps {
   onCopy: () => void;
 }
 
-export const ShareModal: React.FC<ShareModalProps> = ({
-  isOpen,
-  onClose,
-  shareUrl,
-  onCopy
-}) => {
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Share Link" maxWidth="max-w-md">
-      <div className="space-y-4">
-        <p className="text-gray-400">Copy this link to share:</p>
-        <div className="flex items-center space-x-2">
-          <input
-            type="text"
-            value={shareUrl}
-            readOnly
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white"
-          />
-          <button
-            onClick={onCopy}
-            className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded transition-colors text-white"
-          >
-            Copy
-          </button>
-        </div>
-        <div className="flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-};
+export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, shareUrl, onCopy }) => (
+  <Modal isOpen={isOpen} onClose={onClose} title="Share link" kicker="Public link" width={440}>
+    <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--nc-mut)' }}>
+      Anyone with this link can listen. It always serves the current version.
+    </p>
+    <div style={{ display: 'flex', gap: 8 }}>
+      <input className="nc-input nc-mono" style={{ fontSize: 12 }} value={shareUrl} readOnly />
+      <button className="nc-btn nc-btn-accent" style={{ height: 38 }} onClick={onCopy}>
+        Copy
+      </button>
+    </div>
+  </Modal>
+);

@@ -7,24 +7,27 @@ interface ToastContainerProps {
 }
 
 /**
- * 📢 Toast Container Component
- * 
- * Renders all active toasts in a fixed position
- * Stacks multiple toasts vertically
+ * Stacks active toasts in the top-right. The container owns the positioning so
+ * each toast can animate independently without fighting over a fixed slot.
  */
 export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onDismiss }) => {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2">
-      {toasts.map((toast, index) => (
-        <div
-          key={toast.id}
-          style={{
-            transform: `translateY(${index * 4}px)`,
-            zIndex: 50 - index,
-          }}
-        >
+    <div
+      style={{
+        position: 'fixed',
+        top: 16,
+        right: 16,
+        zIndex: 80,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        pointerEvents: 'none',
+      }}
+    >
+      {toasts.map((toast) => (
+        <div key={toast.id} style={{ pointerEvents: 'auto' }}>
           <ToastComponent toast={toast} onDismiss={onDismiss} />
         </div>
       ))}

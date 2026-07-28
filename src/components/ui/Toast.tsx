@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { X, AlertCircle, CheckCircle, Info, WifiOff } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Icon, IconName } from '../nocturne/icons';
 
 export interface Toast {
   id: string;
@@ -18,98 +18,82 @@ interface ToastProps {
   onDismiss: (id: string) => void;
 }
 
+/** Each kind gets an icon and an accent line — the body stays on the dark panel. */
+const APPEARANCE: Record<Toast['type'], { icon: IconName; color: string }> = {
+  error: { icon: 'warning', color: 'var(--nc-danger)' },
+  success: { icon: 'check', color: 'var(--nc-cy)' },
+  warning: { icon: 'plugOff', color: '#e3c069' },
+  info: { icon: 'globe', color: 'var(--nc-tl)' },
+};
+
 const ToastComponent: React.FC<ToastProps> = ({ toast, onDismiss }) => {
-  const [isVisible, setIsVisible] = useState(false);
-  const [isLeaving, setIsLeaving] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const { icon, color } = APPEARANCE[toast.type];
+
+  const dismiss = useCallback(() => {
+    setLeaving(true);
+    setTimeout(() => onDismiss(toast.id), 250);
+  }, [onDismiss, toast.id]);
 
   useEffect(() => {
-    // Animate in
-    setTimeout(() => setIsVisible(true), 50);
+    const enter = setTimeout(() => setVisible(true), 20);
+    return () => clearTimeout(enter);
+  }, []);
 
-    // Auto dismiss
-    if (toast.duration && toast.duration > 0) {
-      const timer = setTimeout(() => {
-        handleDismiss();
-      }, toast.duration);
-
-      return () => clearTimeout(timer);
-    }
-  }, [toast.duration]);
-
-  const handleDismiss = () => {
-    setIsLeaving(true);
-    setTimeout(() => {
-      onDismiss(toast.id);
-    }, 300);
-  };
-
-  const getIcon = () => {
-    switch (toast.type) {
-      case 'error':
-        return <AlertCircle className="w-5 h-5 text-red-500" />;
-      case 'success':
-        return <CheckCircle className="w-5 h-5 text-green-500" />;
-      case 'warning':
-        return <WifiOff className="w-5 h-5 text-yellow-500" />;
-      case 'info':
-      default:
-        return <Info className="w-5 h-5 text-blue-500" />;
-    }
-  };
-
-  const getStyles = () => {
-    const baseStyles = "border-l-4 shadow-lg";
-    switch (toast.type) {
-      case 'error':
-        return `${baseStyles} bg-red-50 border-red-500 text-red-900`;
-      case 'success':
-        return `${baseStyles} bg-green-50 border-green-500 text-green-900`;
-      case 'warning':
-        return `${baseStyles} bg-yellow-50 border-yellow-500 text-yellow-900`;
-      case 'info':
-      default:
-        return `${baseStyles} bg-blue-50 border-blue-500 text-blue-900`;
-    }
-  };
+  useEffect(() => {
+    if (!toast.duration || toast.duration <= 0) return;
+    const timer = setTimeout(dismiss, toast.duration);
+    return () => clearTimeout(timer);
+  }, [toast.duration, dismiss]);
 
   return (
     <div
-      className={`
-        fixed top-4 right-4 max-w-sm w-full z-50 transition-all duration-300 ease-in-out
-        ${isVisible && !isLeaving ? 'transform translate-x-0 opacity-100' : 'transform translate-x-full opacity-0'}
-      `}
+      role="status"
+      style={{
+        width: 340,
+        maxWidth: 'calc(100vw - 32px)',
+        borderRadius: 'var(--nc-r-lg)',
+        background: 'rgba(23,26,41,0.96)',
+        border: '1px solid var(--nc-line)',
+        borderLeft: `2px solid ${color}`,
+        boxShadow: 'var(--nc-shadow-sm)',
+        backdropFilter: 'blur(10px)',
+        padding: '12px 14px',
+        display: 'flex',
+        gap: 11,
+        alignItems: 'flex-start',
+        transform: visible && !leaving ? 'translateX(0)' : 'translateX(calc(100% + 24px))',
+        opacity: visible && !leaving ? 1 : 0,
+        transition: 'transform 0.25s cubic-bezier(0.2,0.8,0.2,1), opacity 0.25s ease',
+      }}
     >
-      <div className={`${getStyles()} rounded-lg p-4 backdrop-blur-sm`}>
-        <div className="flex items-start">
-          <div className="flex-shrink-0">
-            {getIcon()}
-          </div>
-          <div className="ml-3 w-0 flex-1">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium">{toast.title}</h3>
-              <button
-                onClick={handleDismiss}
-                className="ml-2 flex-shrink-0 p-1 rounded-md hover:bg-black/10 transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            {toast.message && (
-              <p className="mt-1 text-sm opacity-90">{toast.message}</p>
-            )}
-            {toast.action && (
-              <div className="mt-3">
-                <button
-                  onClick={toast.action.onClick}
-                  className="text-sm font-medium underline hover:no-underline transition-all"
-                >
-                  {toast.action.label}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+      <Icon name={icon} size={16} color={color} style={{ marginTop: 1 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--nc-text)' }}>{toast.title}</div>
+        {toast.message && (
+          <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--nc-mut)', lineHeight: 1.5 }}>
+            {toast.message}
+          </p>
+        )}
+        {toast.action && (
+          <button
+            className="nc-link"
+            style={{ marginTop: 9, fontSize: 12.5, color }}
+            onClick={toast.action.onClick}
+          >
+            {toast.action.label}
+          </button>
+        )}
       </div>
+      <button
+        className="nc-btn nc-btn-ghost nc-btn-icon"
+        style={{ width: 24, height: 24 }}
+        onClick={dismiss}
+        aria-label="Dismiss"
+      >
+        <Icon name="x" size={13} />
+      </button>
     </div>
   );
 };

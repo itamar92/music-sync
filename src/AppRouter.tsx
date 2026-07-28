@@ -3,9 +3,9 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { useOptionalUser } from './hooks/useOptionalUser';
 import { useAdminRole } from './hooks/useAdminRole';
 import { isServerMode } from './services/dataMode';
+import { AudioPlayerProvider } from './context/AudioPlayerContext';
 import { PublicApp } from './PublicApp';
 import { AdminDashboard } from './AdminDashboard';
-import { ServerAdminDashboard } from './admin/ServerAdminDashboard';
 import { LoadingSpinner } from './components/LoadingSpinner';
 
 export const AppRouter: React.FC = () => {
@@ -14,7 +14,15 @@ export const AppRouter: React.FC = () => {
 
   if (loading || roleLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-black via-blue-900 to-black flex items-center justify-center">
+      <div
+        className="nc-page"
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         <LoadingSpinner />
       </div>
     );
@@ -22,31 +30,29 @@ export const AppRouter: React.FC = () => {
 
   return (
     <Router>
-      <Routes>
-        {/* Public routes - accessible to everyone */}
-        <Route path="/" element={<PublicApp />} />
-        <Route path="/collection/:collectionId" element={<PublicApp />} />
-        <Route path="/playlist/:playlistId" element={<PublicApp />} />
-        <Route path="/public" element={<PublicApp />} />
+      {/* The audio engine sits above the routes so playback survives navigation. */}
+      <AudioPlayerProvider>
+        <Routes>
+          {/* Public routes - accessible to everyone */}
+          <Route path="/" element={<PublicApp />} />
+          <Route path="/collection/:collectionId" element={<PublicApp />} />
+          <Route path="/playlist/:playlistId" element={<PublicApp />} />
+          <Route path="/public" element={<PublicApp />} />
 
-        {/* Admin routes. In server mode the dashboard handles its own JWT
-            login; in Firebase mode access is gated by auth + admin role. */}
-        <Route
-          path="/admin/*"
-          element={
-            isServerMode ? (
-              <ServerAdminDashboard />
-            ) : user && isAdmin ? (
-              <AdminDashboard />
-            ) : (
-              <Navigate to="/" replace />
-            )
-          }
-        />
+          {/* One dashboard for both modes. Server mode presents its own JWT
+              login inside it; Firebase mode is gated here on auth + admin role
+              so a signed-out visitor is bounced rather than shown a form. */}
+          <Route
+            path="/admin/*"
+            element={
+              isServerMode || (user && isAdmin) ? <AdminDashboard /> : <Navigate to="/" replace />
+            }
+          />
 
-        {/* Catch all route */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Catch all route */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AudioPlayerProvider>
     </Router>
   );
 };

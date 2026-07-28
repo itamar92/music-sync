@@ -1,0 +1,709 @@
+/*
+ * Nocturne — the MusicSync interface layer.
+ *
+ * A quiet, dense dark UI: near-neutral blue-grey grounds, Inter at medium
+ * weight, 8-10px radii, and the accent used as a line and a glow rather than
+ * a flood. Buttons are outlined, never filled. Contrast comes from the tonal
+ * ramp, not from saturation.
+ *
+ * Every colour, radius and motion value in the app should come from a token
+ * here. Nothing below knows about application logic.
+ */
+
+:root {
+  /* ── spectrum ─────────────────────────────────────────────────────────
+     A single cyan → indigo → violet sweep. `--cy` is the accent proper;
+     the rest are stops used by gradients, waveforms and the brand mark. */
+  --nc-cy: #16e0e0;
+  --nc-tl: #22b8d6;
+  --nc-bl: #1f6fc4;
+  --nc-nv: #17408f;
+  --nc-in: #2f1c72;
+  --nc-pu: #3d0d60;
+  --nc-pale: #dce7f5;
+
+  /* ── grounds ───────────────────────────────────────────────────────── */
+  --nc-bg: #101220;
+  --nc-bg-deep: #0b0d16;
+  --nc-panel: #171a29;
+  --nc-panel-2: #1c2032;
+  --nc-sunken: #12141f;
+
+  /* ── ink ───────────────────────────────────────────────────────────── */
+  --nc-text: #e9e9ed;
+  --nc-text-soft: #c8cddb;
+  --nc-muted: #9aa0b4;
+  --nc-mut: #8b91a6;
+  --nc-dim: #5d6478;
+  --nc-faint: #4d5468;
+
+  /* ── edges ─────────────────────────────────────────────────────────── */
+  --nc-line: rgba(233, 233, 237, 0.09);
+  --nc-line-strong: rgba(233, 233, 237, 0.22);
+  --nc-accent-line: rgba(34, 199, 214, 0.45);
+  --nc-accent-line-soft: rgba(34, 184, 214, 0.22);
+  --nc-accent-wash: rgba(34, 199, 214, 0.12);
+  --nc-accent-text: #a9ecf3;
+  --nc-accent-text-bright: #bdf0f6;
+  --nc-accent-text-dim: #8fdfe8;
+
+  /* ── status ────────────────────────────────────────────────────────── */
+  --nc-danger: #e0708a;
+  --nc-danger-line: rgba(224, 112, 138, 0.35);
+  --nc-danger-wash: rgba(224, 112, 138, 0.1);
+  --nc-ok: #7fe3ee;
+
+  /* ── type ──────────────────────────────────────────────────────────── */
+  --nc-font: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --nc-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* ── radii & elevation ─────────────────────────────────────────────── */
+  --nc-r-sm: 7px;
+  --nc-r: 8px;
+  --nc-r-md: 10px;
+  --nc-r-lg: 12px;
+  --nc-r-xl: 14px;
+  --nc-shadow-sm: 0 12px 34px rgba(0, 0, 0, 0.45);
+  --nc-shadow-md: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --nc-shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.55);
+
+  /* ── the page gradient, shared by every full-height surface ────────── */
+  --nc-page: radial-gradient(1200px 600px at 12% -10%, #1a2246 0%, #101220 60%, #0d0f1a 100%);
+}
+
+/* ── motion ─────────────────────────────────────────────────────────────
+   Named so markup reads as intent: a bar rises, an eq dances, a halo
+   breathes, a meter jumps, a view rises in, a sheet slides up. */
+@keyframes ms-bar {
+  0%, 100% { transform: scaleY(0.42); }
+  50% { transform: scaleY(1); }
+}
+@keyframes ms-eq {
+  0%, 100% { height: 35%; }
+  50% { height: 100%; }
+}
+@keyframes ms-halo {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.06); }
+}
+@keyframes ms-meter {
+  from { transform: scaleY(0.25); }
+  to { transform: scaleY(1); }
+}
+@keyframes ms-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes ms-sheet {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes ms-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ── base ───────────────────────────────────────────────────────────── */
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--nc-bg-deep);
+  color: var(--nc-text);
+  font-family: var(--nc-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(34, 199, 214, 0.28);
+}
+
+*:focus-visible {
+  outline: 2px solid var(--nc-tl);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(233, 233, 237, 0.12);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(34, 184, 214, 0.35);
+}
+
+/* Scroll areas inside the app chrome hide their bar until hovered — the
+   design leans on whitespace, and a permanent rail reads as an edge. */
+.nc-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(233, 233, 237, 0.12) transparent;
+}
+
+/* ── surfaces ───────────────────────────────────────────────────────── */
+.nc-page {
+  background: var(--nc-page);
+  color: var(--nc-text);
+  font-family: var(--nc-font);
+}
+
+.nc-panel {
+  background: var(--nc-panel);
+  border: 1px solid var(--nc-line);
+  border-radius: var(--nc-r-md);
+}
+
+.nc-panel-hover {
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.nc-panel-hover:hover {
+  background: var(--nc-panel-2);
+  border-color: rgba(34, 199, 214, 0.32);
+}
+
+/* List rows lift on hover rather than carrying a permanent fill. */
+.nc-row-hover {
+  transition: background-color 0.12s ease;
+}
+.nc-row-hover:hover {
+  background: rgba(233, 233, 237, 0.045);
+}
+
+/* A rule that fades to transparent at both ends rather than stopping
+   cleanly — 48px of falloff a side. */
+.nc-rule {
+  height: 1px;
+  border: 0;
+  margin: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(233, 233, 237, 0.14) 48px,
+    rgba(233, 233, 237, 0.14) calc(100% - 48px),
+    transparent
+  );
+}
+.nc-rule-tight {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(233, 233, 237, 0.14) 32px,
+    rgba(233, 233, 237, 0.14) calc(100% - 32px),
+    transparent
+  );
+}
+
+/* ── type helpers ───────────────────────────────────────────────────── */
+.nc-mono {
+  font-family: var(--nc-mono);
+}
+
+/* The small tracked-out label that sits above a heading. */
+.nc-kicker {
+  font-family: var(--nc-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--nc-dim);
+  text-transform: uppercase;
+}
+
+/* The uppercase section heading used above lists. */
+.nc-section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--nc-mut);
+}
+
+.nc-h1 {
+  margin: 0;
+  font-size: 38px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  text-wrap: pretty;
+}
+
+.nc-h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* ── buttons ─────────────────────────────────────────────────────────
+   Outlined, never filled. The accent lives in the border and the text. */
+.nc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--nc-r);
+  background: transparent;
+  border: 1px solid var(--nc-line);
+  color: var(--nc-text-soft);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+.nc-btn:hover:not(:disabled) {
+  border-color: var(--nc-line-strong);
+  color: var(--nc-text);
+}
+.nc-btn:active:not(:disabled) {
+  background: rgba(233, 233, 237, 0.05);
+}
+.nc-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nc-btn-accent {
+  border-color: var(--nc-accent-line);
+  color: var(--nc-accent-text);
+}
+.nc-btn-accent:hover:not(:disabled) {
+  background: var(--nc-accent-wash);
+  border-color: rgba(34, 199, 214, 0.7);
+  color: var(--nc-accent-text-bright);
+}
+
+.nc-btn-danger {
+  border-color: var(--nc-danger-line);
+  color: var(--nc-danger);
+}
+.nc-btn-danger:hover:not(:disabled) {
+  background: var(--nc-danger-wash);
+  border-color: rgba(224, 112, 138, 0.6);
+}
+
+/* The pill play button — the one place the accent gets a glow. */
+.nc-btn-play {
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border-color: rgba(34, 199, 214, 0.5);
+  color: var(--nc-accent-text-bright);
+  font-size: 13.5px;
+}
+.nc-btn-play:hover:not(:disabled) {
+  background: var(--nc-accent-wash);
+}
+.nc-btn-play-lg {
+  height: 42px;
+  padding: 0 20px;
+  font-size: 14px;
+  box-shadow: 0 0 26px rgba(34, 199, 214, 0.14);
+}
+
+.nc-btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+/* Chromeless control — used for transport skip buttons and row affordances. */
+.nc-btn-ghost {
+  border-color: transparent;
+  background: none;
+  color: var(--nc-muted);
+}
+.nc-btn-ghost:hover:not(:disabled) {
+  border-color: transparent;
+  background: rgba(233, 233, 237, 0.05);
+  color: var(--nc-text);
+}
+
+.nc-btn-block {
+  width: 100%;
+}
+
+/* Text-only back/inline action. */
+.nc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--nc-mut);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.nc-link:hover {
+  color: var(--nc-text);
+}
+
+/* ── form controls ──────────────────────────────────────────────────── */
+.nc-field {
+  display: block;
+}
+.nc-label {
+  display: block;
+  font-size: 12px;
+  color: var(--nc-mut);
+  margin-bottom: 7px;
+}
+
+.nc-input,
+.nc-select,
+.nc-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: var(--nc-r);
+  background: var(--nc-sunken);
+  border: 1px solid var(--nc-line);
+  color: var(--nc-text);
+  font-family: inherit;
+  font-size: 13.5px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.nc-textarea {
+  height: auto;
+  min-height: 84px;
+  padding: 10px 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.nc-input::placeholder,
+.nc-textarea::placeholder {
+  color: var(--nc-dim);
+}
+.nc-input:focus,
+.nc-select:focus,
+.nc-textarea:focus {
+  border-color: var(--nc-accent-line);
+}
+.nc-input:disabled,
+.nc-select:disabled,
+.nc-textarea:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.nc-select option {
+  background: var(--nc-panel);
+  color: var(--nc-text);
+}
+
+/* A search box: icon, borderless input, optional shortcut hint. */
+.nc-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  height: 32px;
+  border-radius: var(--nc-r);
+  background: var(--nc-panel);
+  border: 1px solid var(--nc-line);
+  transition: border-color 0.15s ease;
+}
+.nc-search:focus-within {
+  border-color: var(--nc-accent-line);
+}
+.nc-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--nc-text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.nc-search input::placeholder {
+  color: var(--nc-dim);
+}
+.nc-kbd {
+  font-family: var(--nc-mono);
+  font-size: 10px;
+  color: var(--nc-dim);
+  border: 1px solid var(--nc-line);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+/* Segmented control — two or three exclusive views inside one panel. */
+.nc-seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--nc-r);
+  background: var(--nc-sunken);
+  border: 1px solid var(--nc-line);
+}
+.nc-seg-opt {
+  flex: 1;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--nc-mut);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.nc-seg-opt:hover {
+  color: var(--nc-text);
+}
+.nc-seg-opt[aria-selected='true'] {
+  background: rgba(34, 184, 214, 0.12);
+  color: var(--nc-accent-text-bright);
+}
+
+/* A selectable row in a picker list — the tick is the only fill it gets. */
+.nc-pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: var(--nc-r);
+  background: var(--nc-panel);
+  border: 1px solid var(--nc-line);
+  color: var(--nc-text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.nc-pick:hover {
+  background: var(--nc-panel-2);
+}
+.nc-pick[aria-pressed='true'] {
+  border-color: var(--nc-accent-line);
+  background: rgba(34, 184, 214, 0.08);
+}
+.nc-pick-tick {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  border: 1px solid var(--nc-line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: transparent;
+}
+.nc-pick[aria-pressed='true'] .nc-pick-tick {
+  border-color: var(--nc-accent-line);
+  background: rgba(34, 184, 214, 0.18);
+  color: var(--nc-accent-text-bright);
+}
+
+/* ── tags & badges ──────────────────────────────────────────────────── */
+.nc-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--nc-line);
+  font-family: var(--nc-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--nc-mut);
+  white-space: nowrap;
+}
+.nc-tag-accent {
+  background: rgba(34, 184, 214, 0.08);
+  border-color: var(--nc-accent-line-soft);
+  color: var(--nc-accent-text-dim);
+}
+.nc-tag-danger {
+  background: var(--nc-danger-wash);
+  border-color: var(--nc-danger-line);
+  color: var(--nc-danger);
+}
+
+/* The connection dot — a lit LED when live, an unlit one when not. */
+.nc-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--nc-faint);
+}
+.nc-dot-live {
+  background: var(--nc-cy);
+  box-shadow: 0 0 8px var(--nc-cy);
+}
+
+/* ── tables ─────────────────────────────────────────────────────────── */
+.nc-table {
+  border: 1px solid var(--nc-line);
+  border-radius: var(--nc-r-md);
+  overflow: hidden;
+  background: var(--nc-panel);
+}
+.nc-table-head {
+  font-family: var(--nc-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  color: var(--nc-dim);
+  border-bottom: 1px solid var(--nc-line);
+}
+.nc-table-row {
+  border-bottom: 1px solid var(--nc-line);
+}
+.nc-table-row:last-child {
+  border-bottom: none;
+}
+
+/* ── stat card ──────────────────────────────────────────────────────── */
+.nc-stat {
+  padding: 18px;
+  border-radius: var(--nc-r-md);
+  background: var(--nc-panel);
+  border: 1px solid var(--nc-line);
+}
+.nc-stat-label {
+  font-size: 11.5px;
+  color: var(--nc-mut);
+  margin-bottom: 10px;
+}
+.nc-stat-value {
+  font-family: var(--nc-mono);
+  font-size: 30px;
+  line-height: 1;
+  color: var(--nc-text);
+}
+
+/* ── notices ────────────────────────────────────────────────────────── */
+.nc-notice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 18px;
+  border-radius: var(--nc-r-md);
+  border: 1px solid var(--nc-accent-line-soft);
+  background: linear-gradient(90deg, rgba(34, 184, 214, 0.09), rgba(23, 64, 143, 0.06));
+  font-size: 13px;
+  color: var(--nc-text);
+}
+.nc-notice-danger {
+  border-color: var(--nc-danger-line);
+  background: var(--nc-danger-wash);
+  color: var(--nc-danger);
+}
+
+/* ── dialog ─────────────────────────────────────────────────────────── */
+.nc-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(8, 9, 16, 0.72);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.nc-dialog {
+  width: 100%;
+  border-radius: var(--nc-r-xl);
+  background: var(--nc-panel);
+  border: 1px solid var(--nc-line);
+  box-shadow: var(--nc-shadow-lg);
+  overflow: hidden;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+}
+/* The 2px spectrum hairline that caps every dialog. */
+.nc-dialog-seam {
+  height: 2px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, var(--nc-cy), var(--nc-bl), var(--nc-pu));
+}
+.nc-dialog-body {
+  padding: 26px 28px 28px;
+  overflow-y: auto;
+}
+
+/* ── artwork ────────────────────────────────────────────────────────── */
+/* Generated cover ground — navy folding into violet. */
+.nc-art {
+  background: linear-gradient(155deg, #17408f 0%, #1c1338 55%, #3d0d60 100%);
+  border: 1px solid var(--nc-line);
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* ── spinner ────────────────────────────────────────────────────────── */
+.nc-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(233, 233, 237, 0.12);
+  border-top-color: var(--nc-cy);
+  animation: ms-spin 0.8s linear infinite;
+}
+
+/* ── studio shell ───────────────────────────────────────────────────────
+   The sidebar is a column at desktop width and a slide-over drawer below it.
+   The burger and the drawer's own close button swap in at the same breakpoint,
+   so only one way of dismissing it is ever on screen. */
+.nc-admin-burger,
+.nc-admin-close,
+.nc-admin-scrim {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .nc-admin-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .nc-admin-sidebar.is-open {
+    transform: translateX(0);
+  }
+  .nc-admin-burger,
+  .nc-admin-close {
+    display: inline-flex;
+  }
+  .nc-admin-scrim {
+    display: block;
+  }
+}
+
+/* ── utilities ──────────────────────────────────────────────────────── */
+.nc-truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
