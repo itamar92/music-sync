@@ -1,94 +1,83 @@
 import React, { useState, useEffect } from 'react';
-import { X, Music, Folder, Plus } from 'lucide-react';
-import { doc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { db, auth } from '../../services/firebase';
+import { adminData } from '../../services/adminData';
+import { Modal } from '../Modal';
+import { Segmented, PickRow, DialogActions, FormError } from '../nocturne/Picker';
+import { PlaylistRecord, PickerOption } from './types';
 
 interface EditPlaylistModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (playlist: any) => void;
-  playlist: any;
+  onSuccess: (playlist: PlaylistRecord) => void;
+  playlist: PlaylistRecord | null;
 }
+
+const EMPTY = { name: '', displayName: '', description: '', coverImageUrl: '', collectionId: '' };
 
 export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
-  playlist
+  playlist,
 }) => {
-  const [user] = useAuthState(auth);
-  const [collections, setCollections] = useState<any[]>([]);
-  const [availableFolders, setAvailableFolders] = useState<any[]>([]);
+  const [collections, setCollections] = useState<PickerOption[]>([]);
+  const [folders, setFolders] = useState<PickerOption[]>([]);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
-  const [formData, setFormData] = useState({
-    name: '',
-    displayName: '',
-    description: '',
-    coverImageUrl: '',
-    collectionId: ''
-  });
+  const [form, setForm] = useState(EMPTY);
+  const [tab, setTab] = useState<'details' | 'folders'>('details');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [currentTab, setCurrentTab] = useState<'details' | 'folders'>('details');
 
   useEffect(() => {
-    if (isOpen && playlist) {
-      setFormData({
-        name: playlist.name || '',
-        displayName: playlist.displayName || '',
-        description: playlist.description || '',
-        coverImageUrl: playlist.coverImageUrl || '',
-        collectionId: playlist.collectionId || ''
-      });
-      setSelectedFolders(playlist.folderIds || []);
-    }
+    if (!isOpen || !playlist) return;
+    setForm({
+      name: playlist.name || '',
+      displayName: playlist.displayName || '',
+      description: playlist.description || '',
+      coverImageUrl: playlist.coverImageUrl || '',
+      collectionId: playlist.collectionId || '',
+    });
+    setSelectedFolders(playlist.folderIds || []);
   }, [isOpen, playlist]);
 
   useEffect(() => {
-    const loadData = async () => {
-      if (!user) return;
-      
+    if (!isOpen) return;
+
+    let cancelled = false;
+    (async () => {
       try {
-        // Load collections
-        const collectionsRef = collection(db, 'collections');
-        const collectionsQuery = query(collectionsRef, where('userId', '==', user.uid));
-        const collectionsSnapshot = await getDocs(collectionsQuery);
-        const collectionsData = collectionsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setCollections(collectionsData);
-
-        // Load synced folders
-        const foldersRef = collection(db, 'folderSyncs');
-        const foldersQuery = query(foldersRef, where('userId', '==', user.uid));
-        const foldersSnapshot = await getDocs(foldersQuery);
-        const foldersData = foldersSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setAvailableFolders(foldersData);
-      } catch (error) {
-        console.error('Error loading data:', error);
+        const [collectionRows, folderRows] = await Promise.all([
+          adminData.listCollections(),
+          adminData.listFolders(),
+        ]);
+        if (cancelled) return;
+        setCollections(collectionRows as PickerOption[]);
+        setFolders(folderRows as PickerOption[]);
+      } catch (loadError) {
+        console.error('Error loading data:', loadError);
       }
+    })();
+
+    return () => {
+      cancelled = true;
     };
+  }, [isOpen]);
 
-    if (isOpen) {
-      loadData();
-    }
-  }, [isOpen, user]);
+  const close = () => {
+    setForm(EMPTY);
+    setSelectedFolders([]);
+    setTab('details');
+    setError('');
+    onClose();
+  };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!user) {
-      setError('You must be logged in to edit a playlist');
+  const submit = async () => {
+    if (!playlist) {
+      setError('No playlist selected');
       return;
     }
-
-    if (!formData.name.trim()) {
+    if (!form.name.trim()) {
       setError('Playlist name is required');
+      setTab('details');
       return;
     }
 
@@ -96,261 +85,167 @@ export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
     setError('');
 
     try {
-      const playlistRef = doc(db, 'playlists', playlist.id);
-      
-      const updatedPlaylist = {
-        ...playlist,
-        name: formData.name.trim(),
-        displayName: formData.displayName.trim() || formData.name.trim(),
-        description: formData.description.trim(),
-        coverImageUrl: formData.coverImageUrl.trim(),
-        collectionId: formData.collectionId || null,
+      const updated = await adminData.updatePlaylist(playlist.id, {
+        name: form.name.trim(),
+        displayName: form.displayName.trim() || form.name.trim(),
+        description: form.description.trim(),
+        coverImageUrl: form.coverImageUrl.trim(),
+        collectionId: form.collectionId || null,
         folderIds: selectedFolders,
-        updatedAt: new Date()
-      };
-
-      await updateDoc(playlistRef, updatedPlaylist);
-      
-      onSuccess(updatedPlaylist);
-      handleClose();
-    } catch (error) {
-      console.error('Error updating playlist:', error);
+      });
+      onSuccess({ ...playlist, ...updated });
+      close();
+    } catch (submitError) {
+      console.error('Error updating playlist:', submitError);
       setError('Failed to update playlist. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleClose = () => {
-    setFormData({
-      name: '',
-      displayName: '',
-      description: '',
-      coverImageUrl: '',
-      collectionId: ''
-    });
-    setSelectedFolders([]);
-    setCurrentTab('details');
-    setError('');
-    onClose();
-  };
-
-  const toggleFolderSelection = (folderId: string) => {
-    setSelectedFolders(prev => 
-      prev.includes(folderId) 
-        ? prev.filter(id => id !== folderId)
-        : [...prev, folderId]
-    );
-  };
-
-  if (!isOpen) return null;
+  if (!playlist) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-xl p-6 w-full max-w-2xl max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-3">
-            <Music className="w-6 h-6 text-green-400" />
-            <h2 className="text-xl font-bold text-white">Edit Playlist</h2>
-          </div>
-          <button
-            onClick={handleClose}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
-          >
-            <X className="w-5 h-5 text-gray-400" />
-          </button>
-        </div>
+    <Modal isOpen={isOpen} onClose={close} title="Edit playlist" kicker="Studio" width={560}>
+      <Segmented<'details' | 'folders'>
+        label="Playlist sections"
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: 'details', label: 'Details' },
+          { value: 'folders', label: `Folders (${selectedFolders.length})` },
+        ]}
+      />
 
-        {/* Tabs */}
-        <div className="flex space-x-1 mb-6 bg-gray-700/30 p-1 rounded-lg">
-          <button
-            onClick={() => setCurrentTab('details')}
-            className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
-              currentTab === 'details'
-                ? 'bg-green-600 text-white'
-                : 'text-gray-300 hover:text-white hover:bg-gray-600/50'
-            }`}
-          >
-            Details
-          </button>
-          <button
-            onClick={() => setCurrentTab('folders')}
-            className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
-              currentTab === 'folders'
-                ? 'bg-green-600 text-white'
-                : 'text-gray-300 hover:text-white hover:bg-gray-600/50'
-            }`}
-          >
-            Folders ({selectedFolders.length})
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-hidden">
-          {currentTab === 'details' ? (
-            <form onSubmit={handleSubmit} className="h-full flex flex-col space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Playlist Name *
-            </label>
-            <input
-              type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full bg-gray-700/50 text-white placeholder-gray-400 px-4 py-2 rounded-lg border border-gray-600 focus:border-green-500 focus:outline-none"
-              placeholder="e.g., My Favorite Songs"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Display Name
-            </label>
-            <input
-              type="text"
-              value={formData.displayName}
-              onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
-              className="w-full bg-gray-700/50 text-white placeholder-gray-400 px-4 py-2 rounded-lg border border-gray-600 focus:border-green-500 focus:outline-none"
-              placeholder="Optional display name"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Collection
-            </label>
-            <select
-              value={formData.collectionId}
-              onChange={(e) => setFormData({ ...formData, collectionId: e.target.value })}
-              className="w-full bg-gray-700/50 text-white px-4 py-2 rounded-lg border border-gray-600 focus:border-green-500 focus:outline-none"
-            >
-              <option value="">No collection</option>
-              {collections.map((collection) => (
-                <option key={collection.id} value={collection.id}>
-                  {collection.displayName || collection.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Description
-            </label>
-            <textarea
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full bg-gray-700/50 text-white placeholder-gray-400 px-4 py-2 rounded-lg border border-gray-600 focus:border-green-500 focus:outline-none"
-              placeholder="Describe your playlist..."
-              rows={3}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Cover Image URL
-            </label>
-            <input
-              type="url"
-              value={formData.coverImageUrl}
-              onChange={(e) => setFormData({ ...formData, coverImageUrl: e.target.value })}
-              className="w-full bg-gray-700/50 text-white placeholder-gray-400 px-4 py-2 rounded-lg border border-gray-600 focus:border-green-500 focus:outline-none"
-              placeholder="https://example.com/image.jpg"
-            />
-          </div>
-
-          {error && (
-            <div className="p-3 bg-red-900/50 text-red-300 rounded-lg text-sm">
-              {error}
+      <div style={{ marginTop: 18 }}>
+        {tab === 'details' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="nc-field">
+              <label className="nc-label" htmlFor="ep-name">
+                Playlist name
+              </label>
+              <input
+                id="ep-name"
+                className="nc-input"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                required
+              />
             </div>
-          )}
 
-              <div className="flex space-x-3 pt-4 mt-auto">
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  className="flex-1 px-4 py-2 text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCurrentTab('folders')}
-                  className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors"
-                >
-                  Next: Select Folders
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="h-full flex flex-col">
-              <div className="flex-1 overflow-y-auto">
-                <h3 className="text-lg font-semibold text-white mb-3 flex items-center">
-                  <Folder className="w-5 h-5 mr-2 text-yellow-400" />
-                  Select Folders ({availableFolders.length} available, {selectedFolders.length} selected)
-                </h3>
-                {availableFolders.length === 0 ? (
-                  <p className="text-gray-400 text-sm">No synced folders available. Sync some Dropbox folders first.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {availableFolders.map((folder) => (
-                      <div
-                        key={folder.id}
-                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                          selectedFolders.includes(folder.id)
-                            ? 'bg-yellow-600/20 border-yellow-500/50'
-                            : 'bg-gray-700/50 border-gray-600 hover:bg-gray-600/50'
-                        }`}
-                        onClick={() => toggleFolderSelection(folder.id)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h4 className="font-medium text-white">{folder.displayName || folder.name}</h4>
-                            <p className="text-sm text-gray-400">{folder.dropboxPath}</p>
-                            <p className="text-xs text-gray-500">{folder.syncedFiles || 0} audio files</p>
-                          </div>
-                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                            selectedFolders.includes(folder.id)
-                              ? 'bg-yellow-600 border-yellow-600'
-                              : 'border-gray-400'
-                          }`}>
-                            {selectedFolders.includes(folder.id) && (
-                              <Plus className="w-3 h-3 text-white rotate-45" />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {error && (
-                <div className="p-3 bg-red-900/50 text-red-300 rounded-lg text-sm mb-4">
-                  {error}
-                </div>
-              )}
-
-              <div className="flex space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setCurrentTab('details')}
-                  className="flex-1 px-4 py-2 text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
-                >
-                  Back
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={loading}
-                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg transition-colors"
-                >
-                  {loading ? 'Updating...' : 'Update Playlist'}
-                </button>
-              </div>
+            <div className="nc-field">
+              <label className="nc-label" htmlFor="ep-display">
+                Display name
+              </label>
+              <input
+                id="ep-display"
+                className="nc-input"
+                value={form.displayName}
+                onChange={(e) => setForm({ ...form, displayName: e.target.value })}
+              />
             </div>
-          )}
-        </div>
+
+            <div className="nc-field">
+              <label className="nc-label" htmlFor="ep-collection">
+                Collection
+              </label>
+              <select
+                id="ep-collection"
+                className="nc-select"
+                value={form.collectionId}
+                onChange={(e) => setForm({ ...form, collectionId: e.target.value })}
+              >
+                <option value="">No collection</option>
+                {collections.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.displayName || item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="nc-field">
+              <label className="nc-label" htmlFor="ep-description">
+                Description
+              </label>
+              <textarea
+                id="ep-description"
+                className="nc-textarea"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+              />
+            </div>
+
+            <div className="nc-field">
+              <label className="nc-label" htmlFor="ep-cover">
+                Cover image URL
+              </label>
+              <input
+                id="ep-cover"
+                className="nc-input"
+                type="url"
+                value={form.coverImageUrl}
+                onChange={(e) => setForm({ ...form, coverImageUrl: e.target.value })}
+                placeholder="https://…"
+              />
+            </div>
+
+            <FormError message={error} />
+            <DialogActions onCancel={close} onConfirm={submit} confirmLabel="Save changes" busy={loading} />
+          </div>
+        ) : (
+          <div>
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--nc-mut)' }}>
+              Tracks come from the Dropbox folders attached here.
+            </p>
+
+            {folders.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--nc-mut)' }}>
+                No synced folders yet — add one under Folder sync first.
+              </p>
+            ) : (
+              <div
+                className="nc-scroll"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  maxHeight: 320,
+                  paddingRight: 4,
+                }}
+              >
+                {folders.map((folder) => (
+                  <PickRow
+                    key={folder.id}
+                    selected={selectedFolders.includes(folder.id)}
+                    onToggle={() =>
+                      setSelectedFolders((prev) =>
+                        prev.includes(folder.id)
+                          ? prev.filter((id) => id !== folder.id)
+                          : [...prev, folder.id]
+                      )
+                    }
+                    title={folder.displayName || folder.name}
+                    subtitle={folder.dropboxPath}
+                  />
+                ))}
+              </div>
+            )}
+
+            <div style={{ marginTop: 14 }}>
+              <FormError message={error} />
+            </div>
+
+            <DialogActions
+              onCancel={() => setTab('details')}
+              secondaryLabel="Back"
+              onConfirm={submit}
+              confirmLabel="Save changes"
+              busy={loading}
+            />
+          </div>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 };

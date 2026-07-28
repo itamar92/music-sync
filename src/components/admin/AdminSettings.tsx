@@ -1,221 +1,189 @@
 import React, { useState } from 'react';
-import { Settings, Database, Key, Shield, RefreshCw } from 'lucide-react';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { db, auth } from '../../services/firebase';
-import { migrateCollectionsToPublic, migratePlaylistsToPublic } from '../../utils/migratePublicData';
+import { doc, setDoc } from 'firebase/firestore';
+import { useOptionalUser } from '../../hooks/useOptionalUser';
+import { db } from '../../services/firebase';
+import {
+  migrateCollectionsToPublic,
+  migratePlaylistsToPublic,
+} from '../../utils/migratePublicData';
 import { debugCollectionsAndPlaylists, debugDatabase } from '../../utils/debugDatabase';
 import { useToast } from '../../hooks/useToast';
-import { ToastContainer } from '../ToastContainer';
+import { adminData } from '../../services/adminData';
+import { ToastContainer } from '../ui/ToastContainer';
+import { AuthStatus } from '../AuthStatus';
+import { Icon, IconName } from '../nocturne/icons';
+
+/** A titled block of settings — icon, heading, then whatever the section owns. */
+const Section: React.FC<{
+  icon: IconName;
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}> = ({ icon, title, description, children }) => (
+  <section className="nc-panel" style={{ padding: 22, marginBottom: 14 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+      <Icon name={icon} size={16} color="var(--nc-accent-text)" />
+      <h2 className="nc-h2" style={{ fontSize: 16 }}>
+        {title}
+      </h2>
+    </div>
+    {description && (
+      <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--nc-mut)', maxWidth: 620 }}>
+        {description}
+      </p>
+    )}
+    {children}
+  </section>
+);
 
 export const AdminSettings: React.FC = () => {
-  const [user] = useAuthState(auth);
-  const [adminEmail, setAdminEmail] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [migrationLoading, setMigrationLoading] = useState(false);
-  const { toasts, removeToast, success, error, info } = useToast();
+  const [user] = useOptionalUser();
+  // Both tools below write Firestore documents directly; container mode keeps
+  // its library in Postgres and has no equivalent, so they simply don't appear.
+  const { grantSelfAdmin, publicDataMigration, clientDropboxAuth } = adminData.capabilities;
+  const [grantingAdmin, setGrantingAdmin] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const { toasts, removeToast, showSuccess, showError, showInfo } = useToast();
 
-  const handleMakeSelfAdmin = async () => {
+  const makeSelfAdmin = async () => {
     if (!user) {
-      setMessage('You must be logged in to grant admin access');
+      showError('Not signed in', 'You must be logged in to grant admin access.');
       return;
     }
 
-    setLoading(true);
-    setMessage('');
-
+    setGrantingAdmin(true);
     try {
-      const userDocRef = doc(db, 'users', user.uid);
-      
-      await setDoc(userDocRef, {
-        email: user.email,
-        role: 'admin',
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }, { merge: true });
+      await setDoc(
+        doc(db, 'users', user.uid),
+        {
+          email: user.email,
+          role: 'admin',
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      );
 
-      setMessage(`Admin role granted to ${user.email}`);
-      
-      // Refresh the page to update the admin status
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
+      showSuccess('Admin role granted', `${user.email} can now reach the studio. Reloading…`);
+      // The admin-role hook reads once on mount, so a reload is the simplest
+      // way to pick the new role up everywhere.
+      setTimeout(() => window.location.reload(), 1500);
     } catch (error) {
       console.error('Error adding admin:', error);
-      setMessage('Failed to add admin. Check console for details.');
+      showError('Failed to grant admin role', 'Check the console for details.');
     } finally {
-      setLoading(false);
+      setGrantingAdmin(false);
     }
   };
 
-  const handleMigratePublicData = async () => {
+  const migrate = async () => {
     if (!user) {
-      error('You must be logged in to run migration');
+      showError('Not signed in', 'You must be logged in to run the migration.');
       return;
     }
 
-    setMigrationLoading(true);
-    info('Starting migration...');
+    setMigrating(true);
+    showInfo('Migration started');
 
     try {
-      // First, debug the current state
       await debugCollectionsAndPlaylists(user.uid);
-      
-      const collectionsCount = await migrateCollectionsToPublic(user.uid);
-      const playlistsCount = await migratePlaylistsToPublic(user.uid);
-      
-      // Debug again after migration
+      const collections = await migrateCollectionsToPublic(user.uid);
+      const playlists = await migratePlaylistsToPublic(user.uid);
       await debugCollectionsAndPlaylists(user.uid);
-      
-      success(`Migration completed! Updated ${collectionsCount} collections and ${playlistsCount} playlists to public.`);
-    } catch (migrationError) {
-      console.error('Error running migration:', migrationError);
-      error('Failed to run migration. Check console for details.');
+
+      showSuccess(
+        'Migration complete',
+        `${collections} collections and ${playlists} playlists are now public.`
+      );
+    } catch (error) {
+      console.error('Error running migration:', error);
+      showError('Migration failed', 'Check the console for details.');
     } finally {
-      setMigrationLoading(false);
+      setMigrating(false);
     }
   };
 
-  const handleDebugDatabase = async () => {
+  const runDebug = async () => {
     if (!user) {
-      error('You must be logged in to debug database');
+      showError('Not signed in', 'You must be logged in to inspect the database.');
       return;
     }
 
-    info('Debugging database state...');
+    showInfo('Inspecting database', 'Results are written to the browser console.');
     await debugCollectionsAndPlaylists(user.uid);
     await debugDatabase(user.uid);
-    info('Check console for debug information.');
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Settings</h1>
-        <p className="text-gray-400">Configure application settings and integrations</p>
+    <div style={{ maxWidth: 880 }}>
+      <div style={{ marginBottom: 24 }}>
+        <div className="nc-kicker" style={{ marginBottom: 10 }}>
+          Studio
+        </div>
+        <h1 className="nc-h1" style={{ fontSize: 30, marginBottom: 6 }}>
+          Settings
+        </h1>
+        <p style={{ margin: 0, fontSize: 14, color: 'var(--nc-mut)' }}>
+          Integrations, access and one-off maintenance.
+        </p>
       </div>
 
-      {/* Dropbox Integration */}
-      <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
-        <div className="flex items-center space-x-3 mb-4">
-          <Key className="w-5 h-5 text-blue-400" />
-          <h2 className="text-xl font-semibold text-white">Dropbox Integration</h2>
-        </div>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">App Key</label>
-            <input
-              type="text"
-              placeholder="Your Dropbox App Key"
-              className="w-full bg-gray-700/50 text-white placeholder-gray-400 px-4 py-2 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
+      <Section
+        icon="folder"
+        title="Dropbox"
+        description={
+          clientDropboxAuth
+            ? 'This browser holds the Dropbox session used to read your folders.'
+            : 'The backend holds a long-lived refresh token; this browser never sees a Dropbox credential.'
+        }
+      >
+        <AuthStatus mode="admin" />
+      </Section>
+
+      {grantSelfAdmin && (
+      <Section
+        icon="gear"
+        title="Your access"
+        description={
+          user
+            ? `Signed in as ${user.email}. Grant this account the admin role if it doesn't have it yet.`
+            : 'Sign in to manage access.'
+        }
+      >
+        <button
+          className="nc-btn nc-btn-accent"
+          onClick={makeSelfAdmin}
+          disabled={grantingAdmin || !user}
+        >
+          {grantingAdmin ? 'Granting…' : 'Make me admin'}
+        </button>
+      </Section>
+      )}
+
+      {publicDataMigration && (
+      <Section
+        icon="refresh"
+        title="Data migration"
+        description="If the public site can't see your library, mark existing collections and playlists as public. Safe to run more than once."
+      >
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="nc-btn" onClick={runDebug} disabled={!user}>
+            Inspect database
+          </button>
+          <button className="nc-btn nc-btn-accent" onClick={migrate} disabled={migrating || !user}>
+            <Icon
+              name="refresh"
+              size={14}
+              style={migrating ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">App Secret</label>
-            <input
-              type="password"
-              placeholder="Your Dropbox App Secret"
-              className="w-full bg-gray-700/50 text-white placeholder-gray-400 px-4 py-2 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-            />
-          </div>
-          <button className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition-colors">
-            Save Credentials
+            {migrating ? 'Migrating…' : 'Migrate to public access'}
           </button>
         </div>
-      </div>
+      </Section>
+      )}
 
-      {/* Database Settings */}
-      <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
-        <div className="flex items-center space-x-3 mb-4">
-          <Database className="w-5 h-5 text-green-400" />
-          <h2 className="text-xl font-semibold text-white">Database</h2>
-        </div>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-gray-300">Connection Status</span>
-            <span className="text-green-400">Connected</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-gray-300">Last Backup</span>
-            <span className="text-gray-400">Never</span>
-          </div>
-          <button className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg transition-colors">
-            Backup Now
-          </button>
-        </div>
-      </div>
-
-      {/* User Management */}
-      <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
-        <div className="flex items-center space-x-3 mb-4">
-          <Shield className="w-5 h-5 text-yellow-400" />
-          <h2 className="text-xl font-semibold text-white">User Management</h2>
-        </div>
-        <div className="space-y-4">
-          <div className="p-4 bg-blue-900/20 rounded-lg border border-blue-500/30">
-            <p className="text-sm text-blue-300 mb-3">
-              Currently logged in as: <span className="font-medium">{user?.email || 'Not logged in'}</span>
-            </p>
-            <p className="text-xs text-blue-400">
-              Click the button below to grant admin access to your current account.
-            </p>
-          </div>
-          
-          {message && (
-            <div className={`p-3 rounded-lg ${message.includes('Failed') ? 'bg-red-900/50 text-red-300' : 'bg-green-900/50 text-green-300'}`}>
-              {message}
-            </div>
-          )}
-          
-          <button 
-            onClick={handleMakeSelfAdmin}
-            disabled={loading || !user}
-            className="bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 px-4 py-2 rounded-lg transition-colors"
-          >
-            {loading ? 'Granting Admin Access...' : 'Make Me Admin'}
-          </button>
-        </div>
-      </div>
-
-      {/* Data Migration */}
-      <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50">
-        <div className="flex items-center space-x-3 mb-4">
-          <RefreshCw className="w-5 h-5 text-purple-400" />
-          <h2 className="text-xl font-semibold text-white">Data Migration</h2>
-        </div>
-        <div className="space-y-4">
-          <div className="p-4 bg-purple-900/20 rounded-lg border border-purple-500/30">
-            <p className="text-sm text-purple-300 mb-3">
-              If you're experiencing issues with public site access, run this migration to mark existing collections and playlists as public.
-            </p>
-            <p className="text-xs text-purple-400">
-              This will update existing data to work with the new public access system.
-            </p>
-          </div>
-          
-          
-          <div className="flex space-x-3">
-            <button 
-              onClick={handleDebugDatabase}
-              disabled={!user}
-              className="bg-gray-600 hover:bg-gray-700 disabled:opacity-50 px-4 py-2 rounded-lg transition-colors"
-            >
-              Debug Database
-            </button>
-            <button 
-              onClick={handleMigratePublicData}
-              disabled={migrationLoading || !user}
-              className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 px-4 py-2 rounded-lg transition-colors"
-            >
-              {migrationLoading ? 'Running Migration...' : 'Migrate to Public Access'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 };

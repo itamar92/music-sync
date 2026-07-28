@@ -6,7 +6,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import { query, withTransaction } from '../db.js';
 import { listAudioFiles, listFolders, normalizePath } from '../dropbox.js';
-import { toCollection, toPlaylist } from '../mappers.js';
+import { toCollection, toFolderSync, toPlaylist, toTrack } from '../mappers.js';
 import { forget } from '../streamLinks.js';
 
 const router = express.Router();
@@ -19,12 +19,16 @@ const TOKEN_TTL = '12h';
 
 const asyncRoute = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
+// Excluded tracks stay in the table (a re-sync would only bring them back) but
+// must not count toward a playlist's totals anywhere they're reported.
+const LIVE_TRACK = 't.is_excluded = false';
+
 const PLAYLIST_SELECT = `
   SELECT p.*,
          COUNT(t.id)                          AS total_tracks,
          COALESCE(SUM(t.duration_seconds), 0) AS total_duration_seconds
   FROM playlists p
-  LEFT JOIN tracks t ON t.playlist_id = p.id
+  LEFT JOIN tracks t ON t.playlist_id = p.id AND ${LIVE_TRACK}
 `;
 
 /** Constant-time compare that doesn't leak length via an early return. */
@@ -72,32 +76,6 @@ router.use((req, res, next) => {
   }
 });
 
-// --- collections -------------------------------------------------------------
-
-router.get('/collections', asyncRoute(async (_req, res) => {
-  const { rows } = await query('SELECT * FROM collections ORDER BY sort_order, name');
-  res.json(rows.map(toCollection));
-}));
-
-router.post('/collections', asyncRoute(async (req, res) => {
-  const name = String(req.body?.name || '').trim();
-  if (!name) return res.status(400).json({ error: 'name is required' });
-
-  const { rows } = await query(
-    `INSERT INTO collections (name, display_name, description, is_public, sort_order)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING *`,
-    [
-      name,
-      req.body?.displayName || name,
-      req.body?.description || null,
-      Boolean(req.body?.isPublic),
-      Number(req.body?.sortOrder) || 0,
-    ],
-  );
-  res.status(201).json(toCollection(rows[0]));
-}));
-
 /** Map camelCase patch keys to columns; unknown keys are ignored. */
 function buildPatch(body, columns) {
   const sets = [];
@@ -110,6 +88,78 @@ function buildPatch(body, columns) {
   return { sets, values };
 }
 
+const reloadPlaylist = async (id) => {
+  const { rows } = await query(`${PLAYLIST_SELECT} WHERE p.id = $1 GROUP BY p.id`, [id]);
+  return rows[0] ? toPlaylist(rows[0]) : null;
+};
+
+// --- stats -------------------------------------------------------------------
+
+router.get('/stats', asyncRoute(async (_req, res) => {
+  const { rows } = await query(`
+    SELECT
+      (SELECT COUNT(*) FROM collections)                      AS collections,
+      (SELECT COUNT(*) FROM playlists)                        AS playlists,
+      (SELECT COUNT(*) FROM folder_syncs)                     AS folders,
+      (SELECT COUNT(*) FROM tracks WHERE is_excluded = false) AS tracks,
+      (SELECT COUNT(*) FROM playlists WHERE is_public)        AS public_playlists
+  `);
+  const row = rows[0];
+  res.json({
+    collections: Number(row.collections),
+    playlists: Number(row.playlists),
+    folders: Number(row.folders),
+    tracks: Number(row.tracks),
+    publicPlaylists: Number(row.public_playlists),
+  });
+}));
+
+// --- collections -------------------------------------------------------------
+
+router.get('/collections', asyncRoute(async (_req, res) => {
+  const { rows } = await query(`
+    SELECT c.*, COUNT(p.id) AS total_playlists
+    FROM collections c
+    LEFT JOIN playlists p ON p.collection_id = c.id
+    GROUP BY c.id
+    ORDER BY c.sort_order, c.name
+  `);
+  res.json(rows.map((row) => ({
+    ...toCollection(row),
+    totalPlaylists: Number(row.total_playlists ?? 0),
+  })));
+}));
+
+router.post('/collections', asyncRoute(async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name is required' });
+
+  const { rows } = await query(
+    `INSERT INTO collections (name, display_name, description, cover_image_url, is_public, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [
+      name,
+      req.body?.displayName || name,
+      req.body?.description || null,
+      req.body?.coverImageUrl || null,
+      req.body?.isPublic === undefined ? true : Boolean(req.body.isPublic),
+      Number(req.body?.sortOrder) || 0,
+    ],
+  );
+
+  const collection = toCollection(rows[0]);
+
+  // A collection may be created with its playlists already chosen.
+  const playlistIds = Array.isArray(req.body?.playlistIds) ? req.body.playlistIds : [];
+  if (playlistIds.length) {
+    await query('UPDATE playlists SET collection_id = $1, updated_at = now() WHERE id = ANY($2::uuid[])',
+      [collection.id, playlistIds]);
+  }
+
+  res.status(201).json({ ...collection, totalPlaylists: playlistIds.length });
+}));
+
 router.patch('/collections/:id', asyncRoute(async (req, res) => {
   const { sets, values } = buildPatch(req.body, {
     name: 'name',
@@ -119,16 +169,47 @@ router.patch('/collections/:id', asyncRoute(async (req, res) => {
     isPublic: 'is_public',
     sortOrder: 'sort_order',
   });
-  if (sets.length === 0) return res.status(400).json({ error: 'No supported fields to update' });
 
-  values.push(req.params.id);
-  const { rows } = await query(
-    `UPDATE collections SET ${sets.join(', ')}, updated_at = now()
-     WHERE id = $${values.length} RETURNING *`,
-    values,
-  );
+  const playlistIds = Array.isArray(req.body?.playlistIds) ? req.body.playlistIds : null;
+  if (sets.length === 0 && !playlistIds) {
+    return res.status(400).json({ error: 'No supported fields to update' });
+  }
+
+  if (sets.length > 0) {
+    values.push(req.params.id);
+    const updated = await query(
+      `UPDATE collections SET ${sets.join(', ')}, updated_at = now()
+       WHERE id = $${values.length} RETURNING id`,
+      values,
+    );
+    if (updated.rowCount === 0) return res.status(404).json({ error: 'Collection not found' });
+  }
+
+  // Membership is authoritative: anything not listed is detached.
+  if (playlistIds) {
+    await withTransaction(async (client) => {
+      await client.query(
+        'UPDATE playlists SET collection_id = NULL, updated_at = now() WHERE collection_id = $1',
+        [req.params.id],
+      );
+      if (playlistIds.length) {
+        await client.query(
+          'UPDATE playlists SET collection_id = $1, updated_at = now() WHERE id = ANY($2::uuid[])',
+          [req.params.id, playlistIds],
+        );
+      }
+    });
+  }
+
+  const { rows } = await query(`
+    SELECT c.*, COUNT(p.id) AS total_playlists
+    FROM collections c
+    LEFT JOIN playlists p ON p.collection_id = c.id
+    WHERE c.id = $1
+    GROUP BY c.id
+  `, [req.params.id]);
   if (rows.length === 0) return res.status(404).json({ error: 'Collection not found' });
-  res.json(toCollection(rows[0]));
+  res.json({ ...toCollection(rows[0]), totalPlaylists: Number(rows[0].total_playlists ?? 0) });
 }));
 
 router.delete('/collections/:id', asyncRoute(async (req, res) => {
@@ -140,11 +221,64 @@ router.delete('/collections/:id', asyncRoute(async (req, res) => {
 
 // --- playlists ---------------------------------------------------------------
 
-router.get('/playlists', asyncRoute(async (_req, res) => {
+/** Attached folder ids, for the edit dialog's folder picker. */
+const withFolderIds = async (playlists) => {
+  if (playlists.length === 0) return playlists;
   const { rows } = await query(
-    `${PLAYLIST_SELECT} GROUP BY p.id ORDER BY p.sort_order, p.name`,
+    'SELECT playlist_id, folder_id FROM playlist_folders WHERE playlist_id = ANY($1::uuid[])',
+    [playlists.map((p) => p.id)],
   );
-  res.json(rows.map(toPlaylist));
+  const byPlaylist = new Map();
+  for (const row of rows) {
+    if (!byPlaylist.has(row.playlist_id)) byPlaylist.set(row.playlist_id, []);
+    byPlaylist.get(row.playlist_id).push(row.folder_id);
+  }
+  return playlists.map((p) => ({ ...p, folderIds: byPlaylist.get(p.id) || [] }));
+};
+
+router.get('/playlists', asyncRoute(async (_req, res) => {
+  const { rows } = await query(`${PLAYLIST_SELECT} GROUP BY p.id ORDER BY p.sort_order, p.name`);
+  res.json(await withFolderIds(rows.map(toPlaylist)));
+}));
+
+router.post('/playlists', asyncRoute(async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name is required' });
+
+  const folderIds = Array.isArray(req.body?.folderIds) ? req.body.folderIds : [];
+
+  const id = await withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `INSERT INTO playlists (name, display_name, description, cover_image_url, collection_id, type, is_public)
+       VALUES ($1, $2, $3, $4, $5, 'custom', $6)
+       RETURNING id`,
+      [
+        name,
+        req.body?.displayName || name,
+        req.body?.description || null,
+        req.body?.coverImageUrl || null,
+        req.body?.collectionId || null,
+        req.body?.isPublic === undefined ? true : Boolean(req.body.isPublic),
+      ],
+    );
+    const playlistId = rows[0].id;
+
+    for (const folderId of folderIds) {
+      await client.query(
+        'INSERT INTO playlist_folders (playlist_id, folder_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [playlistId, folderId],
+      );
+    }
+    return playlistId;
+  });
+
+  // Pulling the folders' current contents is a convenience, not part of the
+  // creation. Dropbox being unreachable must not fail a request whose record
+  // has already been written — the folder just stays unsynced until next time.
+  const warning = await fillFromFolders(folderIds, id);
+
+  const playlist = await reloadPlaylist(id);
+  res.status(201).json({ ...playlist, folderIds, ...(warning ? { warning } : {}) });
 }));
 
 router.patch('/playlists/:id', asyncRoute(async (req, res) => {
@@ -153,22 +287,62 @@ router.patch('/playlists/:id', asyncRoute(async (req, res) => {
     displayName: 'display_name',
     description: 'description',
     coverImageUrl: 'cover_image_url',
+    artist: 'artist',
     collectionId: 'collection_id',
     isPublic: 'is_public',
     sortOrder: 'sort_order',
   });
-  if (sets.length === 0) return res.status(400).json({ error: 'No supported fields to update' });
 
-  values.push(req.params.id);
-  const updated = await query(
-    `UPDATE playlists SET ${sets.join(', ')}, updated_at = now()
-     WHERE id = $${values.length} RETURNING id`,
-    values,
-  );
-  if (updated.rowCount === 0) return res.status(404).json({ error: 'Playlist not found' });
+  const folderIds = Array.isArray(req.body?.folderIds) ? req.body.folderIds : null;
+  if (sets.length === 0 && !folderIds) {
+    return res.status(400).json({ error: 'No supported fields to update' });
+  }
 
-  const { rows } = await query(`${PLAYLIST_SELECT} WHERE p.id = $1 GROUP BY p.id`, [req.params.id]);
-  res.json(toPlaylist(rows[0]));
+  let warning = null;
+
+  if (sets.length > 0) {
+    values.push(req.params.id);
+    const updated = await query(
+      `UPDATE playlists SET ${sets.join(', ')}, updated_at = now()
+       WHERE id = $${values.length} RETURNING id`,
+      values,
+    );
+    if (updated.rowCount === 0) return res.status(404).json({ error: 'Playlist not found' });
+  }
+
+  if (folderIds) {
+    // Detaching a folder takes its tracks with it; the files stay in Dropbox.
+    const removed = await withTransaction(async (client) => {
+      const dropped = await client.query(
+        `DELETE FROM playlist_folders
+         WHERE playlist_id = $1 AND NOT (folder_id = ANY($2::uuid[]))
+         RETURNING folder_id`,
+        [req.params.id, folderIds],
+      );
+      for (const folderId of folderIds) {
+        await client.query(
+          'INSERT INTO playlist_folders (playlist_id, folder_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [req.params.id, folderId],
+        );
+      }
+      if (dropped.rowCount > 0) {
+        await client.query(
+          'DELETE FROM tracks WHERE playlist_id = $1 AND folder_id = ANY($2::uuid[])',
+          [req.params.id, dropped.rows.map((r) => r.folder_id)],
+        );
+      }
+      return dropped.rowCount;
+    });
+
+    if (removed >= 0) {
+      warning = await fillFromFolders(folderIds, req.params.id);
+    }
+  }
+
+  const playlist = await reloadPlaylist(req.params.id);
+  if (!playlist) return res.status(404).json({ error: 'Playlist not found' });
+  const [withFolders] = await withFolderIds([playlist]);
+  res.json({ ...withFolders, ...(warning ? { warning } : {}) });
 }));
 
 router.delete('/playlists/:id', asyncRoute(async (req, res) => {
@@ -178,12 +352,171 @@ router.delete('/playlists/:id', asyncRoute(async (req, res) => {
   res.json({ success: true });
 }));
 
-// --- dropbox -----------------------------------------------------------------
+// --- tracks ------------------------------------------------------------------
+
+router.get('/playlists/:id/tracks', asyncRoute(async (req, res) => {
+  const { rows } = await query(
+    `SELECT * FROM tracks
+     WHERE playlist_id = $1
+     ORDER BY is_excluded, COALESCE(sort_order, track_number), name`,
+    [req.params.id],
+  );
+  res.json(rows.map(toTrack));
+}));
+
+router.patch('/tracks/:id', asyncRoute(async (req, res) => {
+  const { sets, values } = buildPatch(req.body, {
+    displayName: 'display_name',
+    displayArtist: 'display_artist',
+    durationSeconds: 'duration_seconds',
+    isExcluded: 'is_excluded',
+  });
+  if (sets.length === 0) return res.status(400).json({ error: 'No supported fields to update' });
+
+  values.push(req.params.id);
+  const { rows } = await query(
+    `UPDATE tracks SET ${sets.join(', ')}, updated_at = now()
+     WHERE id = $${values.length} RETURNING *`,
+    values,
+  );
+  if (rows.length === 0) return res.status(404).json({ error: 'Track not found' });
+  res.json(toTrack(rows[0]));
+}));
+
+/** Hide a track from a playlist. Kept, not deleted — a re-sync would restore it. */
+router.delete('/playlists/:playlistId/tracks/:trackId', asyncRoute(async (req, res) => {
+  const { rows } = await query(
+    `UPDATE tracks SET is_excluded = true, updated_at = now()
+     WHERE id = $1 AND playlist_id = $2 RETURNING file_path`,
+    [req.params.trackId, req.params.playlistId],
+  );
+  if (rows.length === 0) return res.status(404).json({ error: 'Track not found' });
+  forget(rows[0].file_path);
+  res.json({ success: true });
+}));
+
+router.put('/playlists/:id/track-order', asyncRoute(async (req, res) => {
+  const trackIds = Array.isArray(req.body?.trackIds) ? req.body.trackIds : null;
+  if (!trackIds) return res.status(400).json({ error: 'trackIds array is required' });
+
+  await withTransaction(async (client) => {
+    for (const [index, trackId] of trackIds.entries()) {
+      await client.query(
+        'UPDATE tracks SET sort_order = $1, updated_at = now() WHERE id = $2 AND playlist_id = $3',
+        [index + 1, trackId, req.params.id],
+      );
+    }
+  });
+
+  res.json({ success: true });
+}));
+
+// --- watched folders ---------------------------------------------------------
+
+router.get('/folders', asyncRoute(async (_req, res) => {
+  const { rows } = await query(`
+    SELECT f.*, COALESCE(ARRAY_AGG(pf.playlist_id) FILTER (WHERE pf.playlist_id IS NOT NULL), '{}') AS playlist_ids
+    FROM folder_syncs f
+    LEFT JOIN playlist_folders pf ON pf.folder_id = f.id
+    GROUP BY f.id
+    ORDER BY f.display_name, f.name
+  `);
+  res.json(rows.map(toFolderSync));
+}));
+
+router.post('/folders', asyncRoute(async (req, res) => {
+  const dropboxPath = normalizePath(String(req.body?.dropboxPath || ''));
+  if (!dropboxPath) return res.status(400).json({ error: 'dropboxPath is required' });
+
+  const name = String(req.body?.name || '').trim()
+    || dropboxPath.split('/').filter(Boolean).pop()
+    || 'Folder';
+
+  const { rows } = await query(
+    `INSERT INTO folder_syncs (dropbox_path, name, display_name, sync_frequency, is_active)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (dropbox_path) DO UPDATE
+       SET display_name = EXCLUDED.display_name, updated_at = now()
+     RETURNING *`,
+    [
+      dropboxPath,
+      name,
+      req.body?.displayName || name,
+      req.body?.syncFrequency || 'manual',
+      req.body?.isActive === undefined ? true : Boolean(req.body.isActive),
+    ],
+  );
+  res.status(201).json(toFolderSync(rows[0]));
+}));
+
+router.patch('/folders/:id', asyncRoute(async (req, res) => {
+  const { sets, values } = buildPatch(req.body, {
+    displayName: 'display_name',
+    syncFrequency: 'sync_frequency',
+    isActive: 'is_active',
+  });
+  if (sets.length === 0) return res.status(400).json({ error: 'No supported fields to update' });
+
+  values.push(req.params.id);
+  const { rows } = await query(
+    `UPDATE folder_syncs SET ${sets.join(', ')}, updated_at = now()
+     WHERE id = $${values.length} RETURNING *`,
+    values,
+  );
+  if (rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
+  res.json(toFolderSync(rows[0]));
+}));
+
+router.delete('/folders/:id', asyncRoute(async (req, res) => {
+  // playlist_folders cascades; tracks attributed to the folder go with it.
+  const result = await withTransaction(async (client) => {
+    await client.query('DELETE FROM tracks WHERE folder_id = $1', [req.params.id]);
+    return client.query('DELETE FROM folder_syncs WHERE id = $1', [req.params.id]);
+  });
+  if (result.rowCount === 0) return res.status(404).json({ error: 'Folder not found' });
+  res.json({ success: true });
+}));
+
+/** Audio files currently in a watched folder, straight from Dropbox. */
+router.get('/folders/:id/files', asyncRoute(async (req, res) => {
+  const { rows } = await query('SELECT dropbox_path FROM folder_syncs WHERE id = $1', [req.params.id]);
+  if (rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
+
+  const files = await listAudioFiles(rows[0].dropbox_path);
+  res.json(files.map((file, index) => ({
+    id: file.id || file.path,
+    name: file.name,
+    path: file.path,
+    size: file.size,
+    modified: file.modified,
+    trackNumber: index + 1,
+  })));
+}));
+
+router.post('/folders/:id/sync', asyncRoute(async (req, res) => {
+  const result = await syncFolderById(req.params.id);
+  if (!result) return res.status(404).json({ error: 'Folder not found' });
+  res.json({ success: true, ...result });
+}));
+
+// --- dropbox browsing --------------------------------------------------------
 
 router.get('/dropbox/folders', asyncRoute(async (req, res) => {
   const folders = await listFolders(String(req.query.path || ''));
   res.json(folders);
 }));
+
+/**
+ * Track count and subfolder presence for one path. The browser asks per row as
+ * it renders, rather than paying for a listing of every subfolder up front.
+ */
+router.get('/dropbox/folder-stats', asyncRoute(async (req, res) => {
+  const path = normalizePath(String(req.query.path || ''));
+  const [files, subfolders] = await Promise.all([listAudioFiles(path), listFolders(path)]);
+  res.json({ path, trackCount: files.length, hasSubfolders: subfolders.length > 0 });
+}));
+
+// --- syncing -----------------------------------------------------------------
 
 /** "01 - Artist - Title.mp3" -> { name, artist, trackNumber }. */
 function parseTrackName(fileName) {
@@ -199,6 +532,115 @@ function parseTrackName(fileName) {
   return { artist: null, name: rest, trackNumber };
 }
 
+/**
+ * Write a folder's current Dropbox contents into one playlist.
+ *
+ * Upserts by (playlist_id, file_path) so renames of the display name and any
+ * hand-set order survive a re-sync, then drops rows for files that have left
+ * the folder. Excluded tracks are left alone — they're a deliberate choice.
+ */
+async function materialiseFolderTracks(folderId, playlistId, files = null) {
+  const folder = await query('SELECT * FROM folder_syncs WHERE id = $1', [folderId]);
+  if (folder.rows.length === 0) return 0;
+
+  const entries = files ?? (await listAudioFiles(folder.rows[0].dropbox_path));
+
+  await withTransaction(async (client) => {
+    for (const [index, file] of entries.entries()) {
+      const parsed = parseTrackName(file.name);
+      await client.query(
+        `INSERT INTO tracks (playlist_id, folder_id, name, artist, file_path, track_number, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6, $6)
+         ON CONFLICT (playlist_id, file_path) DO UPDATE
+           SET name         = EXCLUDED.name,
+               artist       = EXCLUDED.artist,
+               folder_id    = EXCLUDED.folder_id,
+               track_number = EXCLUDED.track_number,
+               updated_at   = now()`,
+        [playlistId, folderId, parsed.name, parsed.artist, file.path, parsed.trackNumber ?? index + 1],
+      );
+    }
+
+    const paths = entries.map((f) => f.path);
+    const removed = await client.query(
+      `DELETE FROM tracks
+       WHERE playlist_id = $1 AND folder_id = $2 AND NOT (file_path = ANY($3::text[]))
+       RETURNING file_path`,
+      [playlistId, folderId, paths],
+    );
+    for (const row of removed.rows) forget(row.file_path);
+  });
+
+  return entries.length;
+}
+
+/**
+ * Best-effort pull of several folders into one playlist.
+ *
+ * Returns a human-readable warning rather than throwing: the caller has already
+ * committed the playlist, so a Dropbox outage should degrade to "created, not
+ * yet populated" instead of a failed request the user can't tell apart from a
+ * write that never happened.
+ */
+async function fillFromFolders(folderIds, playlistId) {
+  const failures = [];
+  for (const folderId of folderIds) {
+    try {
+      await materialiseFolderTracks(folderId, playlistId);
+    } catch (err) {
+      console.error(`[admin] could not pull folder ${folderId}:`, err.message);
+      failures.push(folderId);
+    }
+  }
+  if (failures.length === 0) return null;
+  return `Saved, but ${failures.length} folder(s) could not be read from Dropbox just now. Use Sync to retry.`;
+}
+
+/** Sync a watched folder into every playlist that draws on it. */
+async function syncFolderById(folderId) {
+  const { rows } = await query('SELECT * FROM folder_syncs WHERE id = $1', [folderId]);
+  if (rows.length === 0) return null;
+  const folder = rows[0];
+
+  await query(
+    "UPDATE folder_syncs SET status = 'syncing', updated_at = now() WHERE id = $1",
+    [folderId],
+  );
+
+  try {
+    const files = await listAudioFiles(folder.dropbox_path);
+    const linked = await query(
+      'SELECT playlist_id FROM playlist_folders WHERE folder_id = $1',
+      [folderId],
+    );
+
+    for (const row of linked.rows) {
+      await materialiseFolderTracks(folderId, row.playlist_id, files);
+    }
+
+    await query(
+      `UPDATE folder_syncs
+       SET status = 'synced', last_sync_at = now(), last_error = NULL,
+           total_files = $2, synced_files = $2, updated_at = now()
+       WHERE id = $1`,
+      [folderId, files.length],
+    );
+
+    return { trackCount: files.length, playlistCount: linked.rowCount };
+  } catch (err) {
+    await query(
+      "UPDATE folder_syncs SET status = 'error', last_error = $2, updated_at = now() WHERE id = $1",
+      [folderId, err.message?.slice(0, 500) || 'Sync failed'],
+    );
+    throw err;
+  }
+}
+
+/**
+ * The one-shot shortcut: point at a Dropbox folder and get a playlist mirroring
+ * it. Registers the folder as watched on the way through, so what it creates is
+ * editable afterwards like anything else.
+ */
 router.post('/sync-folder', asyncRoute(async (req, res) => {
   const folderPath = normalizePath(String(req.body?.folderPath || ''));
   if (!folderPath) return res.status(400).json({ error: 'folderPath is required' });
@@ -209,9 +651,20 @@ router.post('/sync-folder', asyncRoute(async (req, res) => {
   const collectionId = req.body?.collectionId || null;
   const isPublic = req.body?.isPublic === undefined ? true : Boolean(req.body.isPublic);
 
-  const playlistId = await withTransaction(async (client) => {
+  const { playlistId, folderId } = await withTransaction(async (client) => {
+    const folder = await client.query(
+      `INSERT INTO folder_syncs (dropbox_path, name, display_name, status, last_sync_at, total_files, synced_files)
+       VALUES ($1, $2, $3, 'synced', now(), $4, $4)
+       ON CONFLICT (dropbox_path) DO UPDATE
+         SET status = 'synced', last_sync_at = now(), last_error = NULL,
+             total_files = EXCLUDED.total_files, synced_files = EXCLUDED.synced_files,
+             updated_at = now()
+       RETURNING id`,
+      [folderPath, folderName, displayName, files.length],
+    );
+
     // Re-syncing the same folder updates the existing playlist in place.
-    const { rows } = await client.query(
+    const playlist = await client.query(
       `INSERT INTO playlists (name, display_name, folder_path, collection_id, type, is_public)
        VALUES ($1, $2, $3, $4, 'folder', $5)
        ON CONFLICT (folder_path) DO UPDATE
@@ -221,36 +674,18 @@ router.post('/sync-folder', asyncRoute(async (req, res) => {
        RETURNING id`,
       [folderName, displayName, folderPath, collectionId, isPublic],
     );
-    const id = rows[0].id;
 
-    for (const [index, file] of files.entries()) {
-      const parsed = parseTrackName(file.name);
-      await client.query(
-        `INSERT INTO tracks (playlist_id, name, artist, file_path, track_number)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (playlist_id, file_path) DO UPDATE
-           SET name         = EXCLUDED.name,
-               artist       = EXCLUDED.artist,
-               track_number = EXCLUDED.track_number,
-               updated_at   = now()`,
-        [id, parsed.name, parsed.artist, file.path, parsed.trackNumber ?? index + 1],
-      );
-    }
-
-    // Tracks removed from Dropbox disappear from the playlist too.
-    const paths = files.map((f) => f.path);
-    const removed = await client.query(
-      `DELETE FROM tracks
-       WHERE playlist_id = $1 AND NOT (file_path = ANY($2::text[]))
-       RETURNING file_path`,
-      [id, paths],
+    await client.query(
+      'INSERT INTO playlist_folders (playlist_id, folder_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [playlist.rows[0].id, folder.rows[0].id],
     );
-    for (const row of removed.rows) forget(row.file_path);
 
-    return id;
+    return { playlistId: playlist.rows[0].id, folderId: folder.rows[0].id };
   });
 
-  res.json({ success: true, playlistId, trackCount: files.length });
+  await materialiseFolderTracks(folderId, playlistId, files);
+
+  res.json({ success: true, playlistId, folderId, trackCount: files.length });
 }));
 
 export default router;

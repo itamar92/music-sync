@@ -1,6 +1,7 @@
 // Admin client for the container backend (server/). Only used when
 // VITE_DATA_MODE=server. Auth is a backend-issued JWT kept in localStorage.
-import { Collection, Playlist } from '../types';
+import { Track } from '../types';
+import { CollectionRecord, PlaylistRecord } from '../components/admin/types';
 
 const TOKEN_KEY = 'musicsync_admin_token';
 
@@ -8,6 +9,22 @@ export interface DropboxFolderEntry {
   id: string;
   name: string;
   path: string;
+}
+
+/** A watched Dropbox folder, as the backend reports it. */
+export interface FolderSyncEntry {
+  id: string;
+  dropboxPath: string;
+  name: string;
+  displayName: string;
+  syncFrequency: string;
+  isActive: boolean;
+  status: 'pending' | 'syncing' | 'synced' | 'error';
+  lastSyncAt?: string | null;
+  lastError?: string;
+  totalFiles: number;
+  syncedFiles: number;
+  playlistIds?: string[];
 }
 
 class AdminApiService {
@@ -67,15 +84,17 @@ class AdminApiService {
   }
 
   // Collections
-  listCollections(): Promise<Collection[]> {
+  listCollections(): Promise<CollectionRecord[]> {
     return this.request('/collections');
   }
 
-  createCollection(input: Partial<Collection> & { name: string }): Promise<Collection> {
+  createCollection(
+    input: Partial<CollectionRecord> & { name: string; playlistIds?: string[] },
+  ): Promise<CollectionRecord> {
     return this.request('/collections', { method: 'POST', body: JSON.stringify(input) });
   }
 
-  updateCollection(id: string, patch: Partial<Collection>): Promise<Collection> {
+  updateCollection(id: string, patch: Partial<CollectionRecord>): Promise<CollectionRecord> {
     return this.request(`/collections/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
   }
 
@@ -84,11 +103,11 @@ class AdminApiService {
   }
 
   // Playlists
-  listPlaylists(): Promise<Playlist[]> {
+  listPlaylists(): Promise<PlaylistRecord[]> {
     return this.request('/playlists');
   }
 
-  updatePlaylist(id: string, patch: Partial<Playlist>): Promise<Playlist> {
+  updatePlaylist(id: string, patch: Partial<PlaylistRecord>): Promise<PlaylistRecord> {
     return this.request(`/playlists/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
   }
 
@@ -96,9 +115,84 @@ class AdminApiService {
     return this.request(`/playlists/${id}`, { method: 'DELETE' });
   }
 
+  createPlaylist(
+    input: Partial<PlaylistRecord> & { name: string; folderIds?: string[] },
+  ): Promise<PlaylistRecord> {
+    return this.request('/playlists', { method: 'POST', body: JSON.stringify(input) });
+  }
+
+  // Tracks
+  listPlaylistTracks(playlistId: string): Promise<Track[]> {
+    return this.request(`/playlists/${playlistId}/tracks`);
+  }
+
+  updateTrack(
+    trackId: string,
+    patch: { displayName?: string; displayArtist?: string; isExcluded?: boolean },
+  ): Promise<Track> {
+    return this.request(`/tracks/${trackId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  }
+
+  setTrackOrder(playlistId: string, trackIds: string[]): Promise<{ success: boolean }> {
+    return this.request(`/playlists/${playlistId}/track-order`, {
+      method: 'PUT',
+      body: JSON.stringify({ trackIds }),
+    });
+  }
+
+  removeTrack(playlistId: string, trackId: string): Promise<{ success: boolean }> {
+    return this.request(`/playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' });
+  }
+
+  // Watched folders
+  listFolders(): Promise<FolderSyncEntry[]> {
+    return this.request('/folders');
+  }
+
+  addFolder(input: {
+    dropboxPath: string;
+    name?: string;
+    displayName?: string;
+    syncFrequency?: string;
+    isActive?: boolean;
+  }): Promise<FolderSyncEntry> {
+    return this.request('/folders', { method: 'POST', body: JSON.stringify(input) });
+  }
+
+  updateFolder(id: string, patch: Partial<FolderSyncEntry>): Promise<FolderSyncEntry> {
+    return this.request(`/folders/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  }
+
+  deleteFolder(id: string): Promise<void> {
+    return this.request(`/folders/${id}`, { method: 'DELETE' });
+  }
+
+  syncFolderById(id: string): Promise<{ success: boolean; trackCount: number }> {
+    return this.request(`/folders/${id}/sync`, { method: 'POST' });
+  }
+
+  listFolderFiles(id: string): Promise<Array<{ id: string; name: string; path: string }>> {
+    return this.request(`/folders/${id}/files`);
+  }
+
+  // Stats
+  stats(): Promise<{
+    collections: number;
+    playlists: number;
+    folders: number;
+    tracks: number;
+    publicPlaylists: number;
+  }> {
+    return this.request('/stats');
+  }
+
   // Dropbox
   listDropboxFolders(path = ''): Promise<DropboxFolderEntry[]> {
     return this.request(`/dropbox/folders?path=${encodeURIComponent(path)}`);
+  }
+
+  dropboxFolderStats(path: string): Promise<{ trackCount: number; hasSubfolders: boolean }> {
+    return this.request(`/dropbox/folder-stats?path=${encodeURIComponent(path)}`);
   }
 
   syncFolder(input: {
@@ -106,7 +200,7 @@ class AdminApiService {
     collectionId?: string;
     displayName?: string;
     isPublic?: boolean;
-  }): Promise<{ success: boolean; playlistId: string; trackCount: number }> {
+  }): Promise<{ success: boolean; playlistId: string; folderId: string; trackCount: number }> {
     return this.request('/sync-folder', { method: 'POST', body: JSON.stringify(input) });
   }
 }
