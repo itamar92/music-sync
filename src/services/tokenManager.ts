@@ -3,7 +3,7 @@ import { auth } from './firebase';
 import { TokenEncryption, EncryptedData } from './tokenEncryption';
 import { PublicTokenService } from './publicTokenService';
 
-interface TokenData {
+export interface TokenData {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
@@ -30,7 +30,7 @@ class TokenManager {
   private refreshPromise: Promise<TokenData | null> | null = null;
   private retryCount = 0;
   private maxRetries = 3;
-  private refreshTimer: NodeJS.Timeout | null = null;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * Store tokens securely with enterprise-grade encryption

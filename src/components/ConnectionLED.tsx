@@ -5,31 +5,22 @@ interface ConnectionLEDProps {
   size?: 'sm' | 'md' | 'lg';
 }
 
-/**
- * 🔴🟢 Simple LED Connection Status Indicator
- * 
- * Shows a small colored circle indicating connection status
- * Green = Connected, Red = Disconnected
- */
-export const ConnectionLED: React.FC<ConnectionLEDProps> = ({ 
-  isConnected, 
-  size = 'sm' 
-}) => {
-  const sizeClasses = {
-    sm: 'w-2 h-2',
-    md: 'w-3 h-3', 
-    lg: 'w-4 h-4'
-  };
+const SIZES = { sm: 6, md: 8, lg: 10 } as const;
 
-  const baseClasses = `rounded-full ${sizeClasses[size]} transition-colors duration-300`;
-  const statusClasses = isConnected 
-    ? 'bg-green-500 shadow-green-400/50 shadow-sm' 
-    : 'bg-red-500 shadow-red-400/50 shadow-sm';
+/**
+ * The connection LED. Lit cyan with a glow when Dropbox is reachable, an unlit
+ * grey when it isn't — the system reads "off", not "error", since a dropped
+ * connection is usually transient.
+ */
+export const ConnectionLED: React.FC<ConnectionLEDProps> = ({ isConnected, size = 'sm' }) => {
+  const px = SIZES[size];
 
   return (
-    <div 
-      className={`${baseClasses} ${statusClasses}`}
+    <span
+      className={`nc-dot ${isConnected ? 'nc-dot-live' : ''}`}
+      style={{ width: px, height: px, transition: 'background-color 0.3s ease' }}
       title={isConnected ? 'Connected to Dropbox' : 'Disconnected from Dropbox'}
+      role="img"
       aria-label={isConnected ? 'Connected' : 'Disconnected'}
     />
   );

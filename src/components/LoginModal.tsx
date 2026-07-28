@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { X, Eye, EyeOff, Mail, Lock, LogIn } from 'lucide-react';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../services/firebase';
+import { Icon } from './nocturne/icons';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -9,14 +9,45 @@ interface LoginModalProps {
   onLoginSuccess?: () => void;
 }
 
+/** Firebase auth codes, translated into something a person can act on. */
+const errorMessage = (code: string): string => {
+  switch (code) {
+    case 'auth/user-not-found':
+      return 'No account found with this email address';
+    case 'auth/wrong-password':
+      return 'Incorrect password';
+    case 'auth/invalid-email':
+      return 'Invalid email address';
+    case 'auth/user-disabled':
+      return 'This account has been disabled';
+    case 'auth/too-many-requests':
+      return 'Too many failed attempts. Please try again later';
+    case 'auth/invalid-credential':
+      return 'Invalid email or password';
+    default:
+      return 'Login failed. Please try again';
+  }
+};
+
 export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [resetEmailSent, setResetEmailSent] = useState(false);
-  const [showResetForm, setShowResetForm] = useState(false);
+  const [resetMode, setResetMode] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+
+  const reset = () => {
+    setResetMode(false);
+    setResetSent(false);
+    setError('');
+  };
+
+  const close = () => {
+    onClose();
+    reset();
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,15 +60,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
       onClose();
       setEmail('');
       setPassword('');
-    } catch (error: any) {
-      console.error('Login error:', error);
-      setError(getErrorMessage(error.code));
+    } catch (err) {
+      console.error('Login error:', err);
+      setError(errorMessage((err as { code?: string })?.code || ''));
     } finally {
       setLoading(false);
     }
   };
 
-  const handlePasswordReset = async (e: React.FormEvent) => {
+  const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) {
       setError('Please enter your email address');
@@ -49,205 +80,146 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
 
     try {
       await sendPasswordResetEmail(auth, email);
-      setResetEmailSent(true);
-      setError('');
-    } catch (error: any) {
-      console.error('Password reset error:', error);
-      setError(getErrorMessage(error.code));
+      setResetSent(true);
+    } catch (err) {
+      console.error('Password reset error:', err);
+      setError(errorMessage((err as { code?: string })?.code || ''));
     } finally {
       setLoading(false);
     }
   };
 
-  const getErrorMessage = (errorCode: string) => {
-    switch (errorCode) {
-      case 'auth/user-not-found':
-        return 'No account found with this email address';
-      case 'auth/wrong-password':
-        return 'Incorrect password';
-      case 'auth/invalid-email':
-        return 'Invalid email address';
-      case 'auth/user-disabled':
-        return 'This account has been disabled';
-      case 'auth/too-many-requests':
-        return 'Too many failed attempts. Please try again later';
-      case 'auth/invalid-credential':
-        return 'Invalid email or password';
-      default:
-        return 'Login failed. Please try again';
-    }
-  };
-
-  const resetForm = () => {
-    setShowResetForm(false);
-    setResetEmailSent(false);
-    setError('');
-  };
-
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-gray-900 rounded-xl border border-gray-700/50 w-full max-w-md">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-700/50">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center">
-              <LogIn className="w-5 h-5" />
-            </div>
-            <h2 className="text-xl font-semibold text-white">
-              {showResetForm ? 'Reset Password' : 'Admin Login'}
-            </h2>
-          </div>
-          <button
-            onClick={() => {
-              onClose();
-              resetForm();
+    <div className="nc-backdrop" onClick={close} role="presentation">
+      <div
+        className="nc-dialog"
+        style={{ maxWidth: 392 }}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Studio access"
+      >
+        <div className="nc-dialog-seam" />
+        <div className="nc-dialog-body">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              marginBottom: 20,
             }}
-            className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
           >
-            <X className="w-5 h-5 text-gray-400" />
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-6">
-          {showResetForm ? (
-            // Password Reset Form
             <div>
-              {resetEmailSent ? (
-                <div className="text-center">
-                  <div className="w-12 h-12 bg-green-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Mail className="w-6 h-6 text-green-400" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-white mb-2">Check Your Email</h3>
-                  <p className="text-gray-300 mb-6">
-                    We've sent a password reset link to <strong>{email}</strong>
-                  </p>
-                  <button
-                    onClick={resetForm}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg transition-colors"
-                  >
-                    Back to Login
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handlePasswordReset} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      Email Address
-                    </label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="w-full bg-gray-800 text-white pl-10 pr-4 py-3 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-                        placeholder="Enter your email"
-                        required
-                      />
-                    </div>
-                  </div>
+              <div className="nc-kicker" style={{ fontSize: 10.5, marginBottom: 8 }}>
+                Studio access
+              </div>
+              <h2 className="nc-h2">{resetMode ? 'Reset your password' : 'Welcome back'}</h2>
+            </div>
+            <button
+              className="nc-btn nc-btn-icon"
+              style={{ width: 30, height: 30 }}
+              onClick={close}
+              aria-label="Close"
+            >
+              <Icon name="x" size={15} />
+            </button>
+          </div>
 
-                  {error && (
-                    <div className="bg-red-900/50 border border-red-500/50 rounded-lg p-3">
-                      <p className="text-red-400 text-sm">{error}</p>
-                    </div>
-                  )}
-
-                  <div className="flex space-x-3">
-                    <button
-                      type="button"
-                      onClick={resetForm}
-                      className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-lg transition-colors"
-                      disabled={loading}
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="submit"
-                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg transition-colors disabled:opacity-50"
-                      disabled={loading}
-                    >
-                      {loading ? 'Sending...' : 'Send Reset Link'}
-                    </button>
-                  </div>
-                </form>
-              )}
+          {resetMode && resetSent ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <p style={{ margin: 0, fontSize: 13.5, color: 'var(--nc-mut)', lineHeight: 1.6 }}>
+                A reset link is on its way to <strong style={{ color: 'var(--nc-text)' }}>{email}</strong>.
+              </p>
+              <button className="nc-btn nc-btn-accent nc-btn-block" style={{ height: 40 }} onClick={reset}>
+                Back to sign in
+              </button>
             </div>
           ) : (
-            // Login Form
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Email Address
+            <form
+              onSubmit={resetMode ? handleReset : handleLogin}
+              style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
+            >
+              <div className="nc-field">
+                <label className="nc-label" htmlFor="login-email">
+                  Email
                 </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full bg-gray-800 text-white pl-10 pr-4 py-3 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-                    placeholder="admin@example.com"
-                    required
-                  />
-                </div>
+                <input
+                  id="login-email"
+                  className="nc-input"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@studio.com"
+                  required
+                  autoComplete="email"
+                />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Password
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-gray-800 text-white pl-10 pr-12 py-3 rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
-                    placeholder="Enter your password"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
+              {!resetMode && (
+                <div className="nc-field">
+                  <label className="nc-label" htmlFor="login-password">
+                    Password
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      id="login-password"
+                      className="nc-input"
+                      style={{ paddingRight: 40 }}
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      style={{
+                        position: 'absolute',
+                        right: 10,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        padding: 4,
+                        cursor: 'pointer',
+                        color: 'var(--nc-mut)',
+                      }}
+                    >
+                      <Icon name={showPassword ? 'eyeSlash' : 'eye'} size={16} />
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {error && (
-                <div className="bg-red-900/50 border border-red-500/50 rounded-lg p-3">
-                  <p className="text-red-400 text-sm">{error}</p>
+                <div className="nc-notice nc-notice-danger" style={{ fontSize: 12.5 }}>
+                  <Icon name="warning" size={15} />
+                  {error}
                 </div>
               )}
 
               <button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+                className="nc-btn nc-btn-accent nc-btn-block"
+                style={{ height: 40, marginTop: 4 }}
                 disabled={loading}
               >
-                {loading ? (
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                ) : (
-                  <>
-                    <LogIn className="w-5 h-5" />
-                    <span>Sign In</span>
-                  </>
-                )}
+                {loading ? 'Working…' : resetMode ? 'Send reset link' : 'Sign in'}
               </button>
 
-              <div className="text-center">
+              <div style={{ textAlign: 'center' }}>
                 <button
                   type="button"
-                  onClick={() => setShowResetForm(true)}
-                  className="text-blue-400 hover:text-blue-300 text-sm underline"
+                  className="nc-link"
+                  style={{ fontSize: 12.5 }}
+                  onClick={() => (resetMode ? reset() : setResetMode(true))}
                 >
-                  Forgot your password?
+                  {resetMode ? 'Back to sign in' : 'Forgot your password?'}
                 </button>
               </div>
             </form>

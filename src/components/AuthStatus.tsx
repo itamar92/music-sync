@@ -1,145 +1,81 @@
-import React, { useState, useEffect } from 'react';
-import { Wifi, WifiOff, RefreshCw, Globe } from 'lucide-react';
+import React, { useState } from 'react';
 import { dropboxService } from '../services/dropboxService';
+import { useDropboxConnection } from '../hooks/useDropboxConnection';
 import { useToast } from '../hooks/useToast';
-import { ConnectionLED } from './ConnectionLED';
-import { PublicTokenService } from '../services/publicTokenService';
-import { publicDataService } from '../services/publicDataService';
 import { isServerMode } from '../services/dataMode';
+import { ConnectionLED } from './ConnectionLED';
+import { Icon } from './nocturne/icons';
 
 interface AuthStatusProps {
   mode?: 'admin' | 'public';
 }
 
 /**
- * 🔐 Authentication Status Indicator
- * 
- * Shows Dropbox connection status with visual feedback
- * Admin mode: Full interface with reconnect button
- * Public mode: Simple LED indicator only
+ * Dropbox connection status.
+ *
+ * Public mode is a bare LED and a word — a visitor can't do anything about a
+ * dropped connection, so offering them a button would be noise. Admin mode adds
+ * the reconnect action, and only in Firebase mode: in container mode the
+ * credential lives on the backend and no browser action can restore it.
  */
 export const AuthStatus: React.FC<AuthStatusProps> = ({ mode = 'admin' }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [isUsingPublicTokens, setIsUsingPublicTokens] = useState(false);
+  const { connected, usingPublicTokens, checking } = useDropboxConnection();
+  const [connecting, setConnecting] = useState(false);
   const { showConnectionRestored, showAuthError } = useToast();
 
-  useEffect(() => {
-    // Container mode: the browser never connects to Dropbox — the backend holds
-    // the credentials. Reporting this client's (always absent) Dropbox session
-    // would read "Offline" forever, so report the backend's Dropbox health
-    // instead, which is what a visitor actually cares about.
-    if (isServerMode) {
-      let cancelled = false;
-
-      const pollBackend = async () => {
-        const status = await publicDataService.getServerStatus();
-        if (!cancelled) setIsAuthenticated(Boolean(status?.hasToken));
-      };
-
-      pollBackend();
-      const backendInterval = setInterval(pollBackend, 30000);
-      return () => {
-        cancelled = true;
-        clearInterval(backendInterval);
-      };
-    }
-
-    // Check initial authentication status
-    const checkAuthStatus = async () => {
-      const authenticated = dropboxService.isAuthenticated();
-      setIsAuthenticated(authenticated);
-      
-      // Check if using public tokens
-      if (authenticated) {
-        const publicTokensAvailable = await PublicTokenService.arePublicTokensAvailable();
-        setIsUsingPublicTokens(publicTokensAvailable);
-      }
-    };
-    
-    checkAuthStatus();
-
-    // Poll authentication status every 30 seconds
-    const interval = setInterval(async () => {
-      const newAuthStatus = dropboxService.isAuthenticated();
-      
-      // Show notification when connection is restored
-      if (newAuthStatus && !isAuthenticated) {
-        showConnectionRestored();
-      }
-      
-      setIsAuthenticated(newAuthStatus);
-      
-      // Check public tokens status
-      if (newAuthStatus) {
-        const publicTokensAvailable = await PublicTokenService.arePublicTokensAvailable();
-        setIsUsingPublicTokens(publicTokensAvailable);
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [isAuthenticated, showConnectionRestored]);
-
-  const handleReconnect = async () => {
-    setIsConnecting(true);
+  const reconnect = async () => {
+    setConnecting(true);
     try {
       await dropboxService.authenticate();
-      setIsAuthenticated(true);
       showConnectionRestored();
     } catch (error) {
-      showAuthError(
-        error instanceof Error ? error.message : 'Failed to connect to Dropbox'
-      );
+      showAuthError(error instanceof Error ? error.message : 'Failed to connect to Dropbox');
     } finally {
-      setIsConnecting(false);
+      setConnecting(false);
     }
   };
 
-  // Public mode: Show only LED indicator
   if (mode === 'public') {
     return (
-      <div className="flex items-center gap-2">
-        <ConnectionLED isConnected={isAuthenticated} size="md" />
-        <span className="text-xs text-gray-600">
-          {isAuthenticated ? 'Connected' : 'Offline'}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        <ConnectionLED isConnected={connected} size="md" />
+        <span className="nc-mono" style={{ fontSize: 11, color: 'var(--nc-mut)' }}>
+          {checking ? 'Checking' : connected ? 'Connected' : 'Offline'}
         </span>
-      </div>
+      </span>
     );
   }
 
-  // Admin mode: Show full interface with reconnect functionality
-  if (isAuthenticated) {
+  if (connected) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1 bg-green-50 border border-green-200 rounded-lg">
-        {isUsingPublicTokens ? (
-          <Globe className="w-4 h-4 text-blue-600" />
-        ) : (
-          <Wifi className="w-4 h-4 text-green-600" />
-        )}
-        <span className="text-sm text-green-700 font-medium">
-          {isUsingPublicTokens ? 'Public Access' : 'Connected'}
-        </span>
-        {isUsingPublicTokens && (
-          <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
-            Shared
-          </span>
-        )}
-      </div>
+      <span className="nc-tag nc-tag-accent">
+        <span className="nc-dot nc-dot-live" />
+        {usingPublicTokens ? 'SHARED ACCESS' : 'DROPBOX CONNECTED'}
+      </span>
     );
   }
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1 bg-red-50 border border-red-200 rounded-lg">
-      <WifiOff className="w-4 h-4 text-red-600" />
-      <span className="text-sm text-red-700 font-medium">Disconnected</span>
-      <button
-        onClick={handleReconnect}
-        disabled={isConnecting}
-        className="ml-2 flex items-center gap-1 px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-medium transition-colors disabled:opacity-50"
-      >
-        <RefreshCw className={`w-3 h-3 ${isConnecting ? 'animate-spin' : ''}`} />
-        {isConnecting ? 'Connecting...' : 'Reconnect'}
-      </button>
-    </div>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      <span className="nc-tag nc-tag-danger">
+        <Icon name="plugOff" size={12} />
+        {checking ? 'CHECKING' : 'DISCONNECTED'}
+      </span>
+      {!isServerMode && (
+        <button
+          className="nc-btn"
+          style={{ height: 28, fontSize: 12 }}
+          onClick={reconnect}
+          disabled={connecting}
+        >
+          <Icon
+            name="refresh"
+            size={13}
+            style={connecting ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
+          />
+          {connecting ? 'Connecting…' : 'Reconnect'}
+        </button>
+      )}
+    </span>
   );
 };
