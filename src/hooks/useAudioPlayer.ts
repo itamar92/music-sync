@@ -29,6 +29,13 @@ export const useAudioPlayer = () => {
     isPlayingRef.current = state.isPlaying;
   }, [state.isPlaying]);
 
+  // Read by the metadata listener, which is registered once and would otherwise
+  // close over a stale track.
+  const currentTrackRef = useRef(state.currentTrack);
+  useEffect(() => {
+    currentTrackRef.current = state.currentTrack;
+  }, [state.currentTrack]);
+
   // 🎵 Dynamic document title for mobile users
   useDocumentTitle({
     currentTrack: state.currentTrack,
@@ -307,6 +314,13 @@ export const useAudioPlayer = () => {
     const handleMetadataLoaded = (event: CustomEvent) => {
       console.log('🎯 Custom audioMetadataLoaded event:', event.detail.duration);
       updateState({ duration: event.detail.duration });
+
+      // Container mode stores durations but can't measure them server-side, so
+      // the first listener to load a track tells the backend what it found.
+      const track = currentTrackRef.current;
+      if (isServerMode && track?.id && !track.durationSeconds) {
+        publicDataService.reportTrackDuration(track.id, event.detail.duration);
+      }
     };
 
     const handleTimeUpdate = (event: CustomEvent) => {

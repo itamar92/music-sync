@@ -1,259 +1,220 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Eye, FolderOpen } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { CreateCollectionModal } from './CreateCollectionModal';
 import { EditCollectionModal } from './EditCollectionModal';
 import { CollectionView } from '../shared/CollectionView';
-import { collection, query, where, getDocs, doc, deleteDoc } from 'firebase/firestore';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { useNavigate } from 'react-router-dom';
-import { db, auth } from '../../services/firebase';
+import { adminData } from '../../services/adminData';
 import { useToast } from '../../hooks/useToast';
-import { ToastContainer } from '../ToastContainer';
+import { ToastContainer } from '../ui/ToastContainer';
+import { CollectionGlyph } from '../nocturne/WaveMark';
+import { Icon } from '../nocturne/icons';
+import { CollectionRecord } from './types';
 
 export const CollectionManagement: React.FC = () => {
-  const [user] = useAuthState(auth);
   const navigate = useNavigate();
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingCollection, setEditingCollection] = useState<any>(null);
-  const [collections, setCollections] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [viewingCollection, setViewingCollection] = useState<any>(null);
-  const { toasts, removeToast, success, error } = useToast();
 
-  const loadCollections = async () => {
-    if (!user) return;
-    
-    setLoading(true);
-    try {
-      const collectionsRef = collection(db, 'collections');
-      const q = query(collectionsRef, where('userId', '==', user.uid));
-      const snapshot = await getDocs(q);
-      
-      const collectionsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      // Calculate playlist counts for each collection
-      const collectionsWithCounts = await Promise.all(
-        collectionsData.map(async (col) => {
-          try {
-            let playlistCount = 0;
-            
-            // First try the playlistIds approach (legacy)
-            if (col.playlistIds && col.playlistIds.length > 0) {
-              playlistCount = col.playlistIds.length;
-            } else {
-              // Then try the collectionId approach (new)
-              const playlistsRef = collection(db, 'playlists');
-              const playlistsQuery = query(
-                playlistsRef, 
-                where('collectionId', '==', col.id),
-                where('userId', '==', user.uid)
-              );
-              const playlistsSnapshot = await getDocs(playlistsQuery);
-              playlistCount = playlistsSnapshot.docs.length;
-            }
-            
-            
-            return {
-              ...col,
-              totalPlaylists: playlistCount
-            };
-          } catch (error) {
-            console.error(`Error loading playlists for collection ${col.id}:`, error);
-            return {
-              ...col,
-              totalPlaylists: 0
-            };
-          }
-        })
-      );
-      
-      setCollections(collectionsWithCounts);
-    } catch (loadError) {
-      console.error('Error loading collections:', loadError);
-      error('Failed to load collections. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [collections, setCollections] = useState<CollectionRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState<CollectionRecord | null>(null);
+  const [viewing, setViewing] = useState<CollectionRecord | null>(null);
+
+  const { toasts, removeToast, showSuccess, showError } = useToast();
 
   useEffect(() => {
-    loadCollections();
-  }, [user]);
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const rows = await adminData.listCollections();
+        if (!cancelled) setCollections(rows);
+      } catch (loadError) {
+        console.error('Error loading collections:', loadError);
+        if (!cancelled) showError('Failed to load collections', 'Please try again.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
 
-  const handleCreateCollection = () => {
-    setShowCreateModal(true);
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [showError]);
 
-  const handleCollectionCreated = (newCollection: any) => {
-    setCollections(prev => [...prev, newCollection]);
-  };
-
-  const handleEditCollection = (collection: any) => {
-    setEditingCollection(collection);
-    setShowEditModal(true);
-  };
-
-  const handleCollectionUpdated = (updatedCollection: any) => {
-    setCollections(prev => prev.map(c => c.id === updatedCollection.id ? updatedCollection : c));
-    setEditingCollection(null);
-    setShowEditModal(false);
-  };
-
-  const handleDeleteCollection = async (collectionId: string) => {
-    if (!confirm('Are you sure you want to delete this collection? This action cannot be undone.')) {
-      return;
-    }
+  const remove = async (id: string, name: string) => {
+    if (!confirm(`Delete "${name}"? This cannot be undone. Playlists inside it are kept.`)) return;
 
     try {
-      await deleteDoc(doc(db, 'collections', collectionId));
-      setCollections(prev => prev.filter(c => c.id !== collectionId));
-      success('Collection deleted successfully.');
+      await adminData.deleteCollection(id);
+      setCollections((prev) => prev.filter((item) => item.id !== id));
+      showSuccess('Collection deleted');
     } catch (deleteError) {
       console.error('Error deleting collection:', deleteError);
-      error('Failed to delete collection. Please try again.');
+      showError('Failed to delete collection', 'Please try again.');
     }
   };
 
-  const handleViewCollection = (selectedCollection: any) => {
-    setViewingCollection(selectedCollection);
-  };
-
-  const handleBackToCollections = () => {
-    setViewingCollection(null);
-  };
-
-  const handlePlaylistSelect = (playlist: any) => {
-    // Navigate to the playlist management page and open the playlist
-    navigate('/admin/playlists');
-    // Store the playlist to open in sessionStorage so PlaylistManagement can pick it up
-    sessionStorage.setItem('openPlaylistId', playlist.id);
-  };
-
-  // If viewing a specific collection, show content view
-  if (viewingCollection) {
+  if (viewing) {
     return (
       <CollectionView
-        collection={viewingCollection}
-        onBack={handleBackToCollections}
-        onPlaylistSelect={handlePlaylistSelect}
+        collection={viewing}
+        onBack={() => setViewing(null)}
+        onPlaylistSelect={(playlist: { id: string }) => {
+          // PlaylistManagement reads this on mount and opens the playlist.
+          sessionStorage.setItem('openPlaylistId', playlist.id);
+          navigate('/admin/playlists');
+        }}
         isReadOnly={false}
       />
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div style={{ maxWidth: 1180 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          gap: 20,
+          marginBottom: 24,
+        }}
+      >
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Collections</h1>
-          <p className="text-gray-400">Organize your playlists into collections</p>
+          <div className="nc-kicker" style={{ marginBottom: 10 }}>
+            Studio
+          </div>
+          <h1 className="nc-h1" style={{ fontSize: 30, marginBottom: 6 }}>
+            Collections
+          </h1>
+          <p style={{ margin: 0, fontSize: 14, color: 'var(--nc-mut)' }}>
+            Group playlists into what a listener sees first.
+          </p>
         </div>
-        <button 
-          onClick={handleCreateCollection}
-          className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Collection</span>
+        <button className="nc-btn nc-btn-accent" onClick={() => setShowCreate(true)}>
+          <Icon name="plus" size={15} />
+          New collection
         </button>
       </div>
 
-      {/* Collections List */}
-      <div className="bg-gray-800/30 backdrop-blur-sm rounded-xl border border-gray-700/50">
-        <div className="p-6">
-          {loading ? (
-            <div className="text-center py-12">
-              <div className="w-8 h-8 animate-spin rounded-full border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
-              <p className="text-gray-400">Loading collections...</p>
-            </div>
-          ) : collections.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Plus className="w-8 h-8 text-gray-400" />
-              </div>
-              <h3 className="text-xl font-semibold text-white mb-2">No Collections Yet</h3>
-              <p className="text-gray-400 mb-6">Create your first collection to organize playlists</p>
-              <button 
-                onClick={handleCreateCollection}
-                className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg transition-colors"
-              >
-                Create Collection
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {collections.map((collection) => (
-                <div 
-                  key={collection.id} 
-                  className="bg-gray-700/30 rounded-lg p-4 border border-gray-600/50 cursor-pointer hover:bg-gray-700/50 transition-colors"
-                  onDoubleClick={() => handleViewCollection(collection)}
-                >
-                  <div className="aspect-square bg-gradient-to-br from-gray-600 to-black rounded-lg mb-3 overflow-hidden">
-                    {collection.coverImageUrl ? (
-                      <img src={collection.coverImageUrl} alt={collection.displayName} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <FolderOpen className="w-12 h-12 text-gray-500" />
-                      </div>
-                    )}
-                  </div>
-                  <h3 className="font-semibold text-white mb-1">{collection.displayName || collection.name}</h3>
-                  {collection.description && (
-                    <p className="text-sm text-gray-400 mb-3 line-clamp-2">{collection.description}</p>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500">{collection.totalPlaylists || 0} playlists</span>
-                    <div className="flex space-x-1">
-                      <button 
-                        onClick={() => handleEditCollection(collection)}
-                        className="p-1 hover:bg-gray-600 rounded text-gray-400 hover:text-white"
-                        title="Edit collection"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => handleViewCollection(collection)}
-                        className="p-1 hover:bg-gray-600 rounded text-gray-400 hover:text-white"
-                        title="View collection"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteCollection(collection.id)}
-                        className="p-1 hover:bg-gray-600 rounded text-gray-400 hover:text-red-400"
-                        title="Delete collection"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+      {loading ? (
+        <div style={{ padding: 48, display: 'flex', justifyContent: 'center' }}>
+          <div className="nc-spinner" />
         </div>
-      </div>
+      ) : collections.length === 0 ? (
+        <div
+          className="nc-panel"
+          style={{ padding: '48px 24px', textAlign: 'center' }}
+        >
+          <h3 className="nc-h2" style={{ marginBottom: 8 }}>
+            No collections yet
+          </h3>
+          <p style={{ margin: '0 0 20px', fontSize: 13.5, color: 'var(--nc-mut)' }}>
+            Create one to organise your playlists.
+          </p>
+          <button className="nc-btn nc-btn-accent" onClick={() => setShowCreate(true)}>
+            <Icon name="plus" size={15} />
+            Create collection
+          </button>
+        </div>
+      ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+            gap: 14,
+          }}
+        >
+          {collections.map((item) => (
+            <div key={item.id} className="nc-panel nc-panel-hover" style={{ padding: 16 }}>
+              <div
+                className="nc-art"
+                style={{
+                  aspectRatio: '1 / 1',
+                  borderRadius: 'var(--nc-r)',
+                  marginBottom: 14,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {item.coverImageUrl ? (
+                  <img
+                    src={item.coverImageUrl}
+                    alt=""
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                ) : (
+                  <CollectionGlyph size={64} />
+                )}
+              </div>
+
+              <h3
+                className="nc-truncate"
+                style={{ margin: '0 0 4px', fontSize: 14.5, fontWeight: 500 }}
+              >
+                {item.displayName || item.name}
+              </h3>
+              <p
+                className="nc-truncate"
+                style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--nc-mut)' }}
+              >
+                {item.description || 'No description'}
+              </p>
+
+              <div
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <span className="nc-mono" style={{ fontSize: 11, color: 'var(--nc-dim)' }}>
+                  {item.totalPlaylists || 0} PLAYLISTS
+                </span>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    className="nc-btn nc-btn-ghost nc-btn-icon"
+                    onClick={() => setViewing(item)}
+                    title="Open collection"
+                  >
+                    <Icon name="eye" size={15} />
+                  </button>
+                  <button
+                    className="nc-btn nc-btn-ghost nc-btn-icon"
+                    onClick={() => setEditing(item)}
+                    title="Edit collection"
+                  >
+                    <Icon name="pencil" size={15} />
+                  </button>
+                  <button
+                    className="nc-btn nc-btn-ghost nc-btn-icon"
+                    style={{ color: 'var(--nc-danger)' }}
+                    onClick={() => remove(item.id, item.displayName || item.name)}
+                    title="Delete collection"
+                  >
+                    <Icon name="trash" size={15} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <CreateCollectionModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onSuccess={handleCollectionCreated}
+        isOpen={showCreate}
+        onClose={() => setShowCreate(false)}
+        onSuccess={(created: CollectionRecord) => setCollections((prev) => [...prev, created])}
       />
 
       <EditCollectionModal
-        isOpen={showEditModal}
-        onClose={() => {
-          setShowEditModal(false);
-          setEditingCollection(null);
+        isOpen={Boolean(editing)}
+        onClose={() => setEditing(null)}
+        onSuccess={(updated: CollectionRecord) => {
+          setCollections((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+          setEditing(null);
         }}
-        onSuccess={handleCollectionUpdated}
-        collection={editingCollection}
+        collection={editing}
       />
 
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 };
