@@ -171,6 +171,9 @@ export const CollectionManagement: React.FC = () => {
               >
                 <span className="nc-mono" style={{ fontSize: 11, color: 'var(--nc-dim)' }}>
                   {item.totalPlaylists || 0} PLAYLISTS
+                  {item.isPublic === false && (
+                    <span style={{ color: 'var(--nc-warn, var(--nc-mut))' }}> · PRIVATE</span>
+                  )}
                 </span>
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button

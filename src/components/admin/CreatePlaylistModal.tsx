@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { adminData } from '../../services/adminData';
 import { Modal } from '../Modal';
-import { Segmented, PickRow, DialogActions, FormError } from '../nocturne/Picker';
+import { Segmented, PickRow, DialogActions, FormError, ToggleRow } from '../nocturne/Picker';
 import { PlaylistRecord, PickerOption } from './types';
 
 interface CreatePlaylistModalProps {
@@ -10,7 +10,14 @@ interface CreatePlaylistModalProps {
   onSuccess: (playlist: PlaylistRecord) => void;
 }
 
-const EMPTY = { name: '', displayName: '', description: '', coverImageUrl: '', collectionId: '' };
+const EMPTY = {
+  name: '',
+  displayName: '',
+  description: '',
+  coverImageUrl: '',
+  collectionId: '',
+  isPublic: true,
+};
 
 export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   isOpen,
@@ -74,6 +81,7 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
           description: form.description.trim(),
           coverImageUrl: form.coverImageUrl.trim(),
           collectionId: form.collectionId || null,
+          isPublic: form.isPublic,
           folderIds: selectedFolders,
         })
       );
@@ -173,6 +181,13 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
                 placeholder="https://…"
               />
             </div>
+
+            <ToggleRow
+              checked={form.isPublic}
+              onChange={(isPublic) => setForm({ ...form, isPublic })}
+              label="Visible on the public site"
+              hint="Private playlists never appear to visitors, even inside a public collection."
+            />
 
             <FormError message={error} />
             <DialogActions

@@ -241,6 +241,13 @@ export const PlaylistManagement: React.FC = () => {
                 style={{ fontSize: 11.5, color: 'var(--nc-dim)', textAlign: 'right' }}
               >
                 {playlist.trackCount || 0} TRACKS
+                {playlist.isPublic === false && (
+                  <span
+                    style={{ display: 'block', color: 'var(--nc-warn, var(--nc-mut))' }}
+                  >
+                    PRIVATE
+                  </span>
+                )}
               </span>
 
               <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>

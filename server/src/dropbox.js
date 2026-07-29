@@ -216,11 +216,11 @@ export function normalizePath(path) {
   return path.startsWith('/') ? path : `/${path}`;
 }
 
-async function listFolderEntries(path) {
+async function listFolderEntries(path, recursive = false) {
   const entries = [];
   let result = await rpc('/files/list_folder', {
     path: normalizePath(path),
-    recursive: false,
+    recursive,
     include_non_downloadable_files: false,
     limit: 2000,
   });
@@ -251,9 +251,13 @@ function isAudioFile(name) {
   return dot !== -1 && AUDIO_EXTENSIONS.has(name.slice(dot).toLowerCase());
 }
 
-/** Audio files directly inside `path`, sorted by name. */
-export async function listAudioFiles(path) {
-  const entries = await listFolderEntries(path);
+/**
+ * Audio files inside `path` — direct children only, or the whole subtree when
+ * `recursive` is set. Sorted by full path so a subtree lists folder by folder,
+ * which for a flat folder is the same as sorting by name.
+ */
+export async function listAudioFiles(path, recursive = false) {
+  const entries = await listFolderEntries(path, recursive);
   return entries
     .filter((e) => e['.tag'] === 'file' && isAudioFile(e.name))
     .map((e) => ({
@@ -263,7 +267,7 @@ export async function listAudioFiles(path) {
       size: e.size,
       modified: e.server_modified,
     }))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
 }
 
 /**

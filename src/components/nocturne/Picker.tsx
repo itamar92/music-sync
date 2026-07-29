@@ -68,6 +68,31 @@ export const PickRow: React.FC<PickRowProps> = ({ selected, onToggle, title, sub
   </button>
 );
 
+interface ToggleRowProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  hint?: string;
+}
+
+/** A labelled checkbox row for dialog options — visibility, sync scope, etc. */
+export const ToggleRow: React.FC<ToggleRowProps> = ({ checked, onChange, label, hint }) => (
+  <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, cursor: 'pointer' }}>
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+      style={{ accentColor: 'var(--nc-tl)', marginTop: 2 }}
+    />
+    <span style={{ minWidth: 0 }}>
+      <span style={{ display: 'block', fontSize: 13 }}>{label}</span>
+      {hint && (
+        <span style={{ display: 'block', fontSize: 11.5, color: 'var(--nc-mut)' }}>{hint}</span>
+      )}
+    </span>
+  </label>
+);
+
 /** The Cancel / confirm pair every dialog ends with. */
 export const DialogActions: React.FC<{
   onCancel: () => void;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { adminData } from '../../services/adminData';
 import { Modal } from '../Modal';
-import { Segmented, PickRow, DialogActions, FormError } from '../nocturne/Picker';
+import { Segmented, PickRow, DialogActions, FormError, ToggleRow } from '../nocturne/Picker';
 import { PlaylistRecord, PickerOption } from './types';
 
 interface EditPlaylistModalProps {
@@ -11,7 +11,14 @@ interface EditPlaylistModalProps {
   playlist: PlaylistRecord | null;
 }
 
-const EMPTY = { name: '', displayName: '', description: '', coverImageUrl: '', collectionId: '' };
+const EMPTY = {
+  name: '',
+  displayName: '',
+  description: '',
+  coverImageUrl: '',
+  collectionId: '',
+  isPublic: true,
+};
 
 export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
   isOpen,
@@ -35,6 +42,7 @@ export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
       description: playlist.description || '',
       coverImageUrl: playlist.coverImageUrl || '',
       collectionId: playlist.collectionId || '',
+      isPublic: playlist.isPublic ?? true,
     });
     setSelectedFolders(playlist.folderIds || []);
   }, [isOpen, playlist]);
@@ -91,6 +99,7 @@ export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
         description: form.description.trim(),
         coverImageUrl: form.coverImageUrl.trim(),
         collectionId: form.collectionId || null,
+        isPublic: form.isPublic,
         folderIds: selectedFolders,
       });
       onSuccess({ ...playlist, ...updated });
@@ -189,6 +198,13 @@ export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
                 placeholder="https://…"
               />
             </div>
+
+            <ToggleRow
+              checked={form.isPublic}
+              onChange={(isPublic) => setForm({ ...form, isPublic })}
+              label="Visible on the public site"
+              hint="Private playlists never appear to visitors, even inside a public collection."
+            />
 
             <FormError message={error} />
             <DialogActions onCancel={close} onConfirm={submit} confirmLabel="Save changes" busy={loading} />

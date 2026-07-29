@@ -25,6 +25,7 @@ class ServerAdminData implements AdminDataService {
     clientDropboxAuth: false,
     grantSelfAdmin: false,
     publicDataMigration: false,
+    recursiveFolderSync: true,
   };
 
   async stats(): Promise<AdminStats> {
@@ -62,16 +63,22 @@ class ServerAdminData implements AdminDataService {
 
   // --- playlists -------------------------------------------------------------
 
+  /** The REST API reports `totalTracks`; the admin UI reads `trackCount`. */
+  private withTrackCount(playlist: PlaylistRecord): PlaylistRecord {
+    return { ...playlist, trackCount: playlist.trackCount ?? playlist.totalTracks ?? 0 };
+  }
+
   async listPlaylists(): Promise<PlaylistRecord[]> {
-    return adminApi.listPlaylists();
+    const playlists = await adminApi.listPlaylists();
+    return playlists.map((playlist) => this.withTrackCount(playlist));
   }
 
   async createPlaylist(input: PlaylistInput): Promise<PlaylistRecord> {
-    return adminApi.createPlaylist(input);
+    return this.withTrackCount(await adminApi.createPlaylist(input));
   }
 
   async updatePlaylist(id: string, patch: Partial<PlaylistRecord>): Promise<PlaylistRecord> {
-    return adminApi.updatePlaylist(id, patch);
+    return this.withTrackCount(await adminApi.updatePlaylist(id, patch));
   }
 
   async deletePlaylist(id: string): Promise<void> {
@@ -118,6 +125,7 @@ class ServerAdminData implements AdminDataService {
       displayName: patch.displayName,
       syncFrequency: patch.syncFrequency,
       isActive: patch.isActive,
+      includeSubfolders: patch.includeSubfolders,
     });
     return { ...folder, lastSyncAt: null };
   }
@@ -144,6 +152,10 @@ class ServerAdminData implements AdminDataService {
 
   folderStats(path: string): Promise<FolderStats> {
     return adminApi.dropboxFolderStats(path);
+  }
+
+  previewFolderFiles(path: string, recursive = false): Promise<FolderFile[]> {
+    return adminApi.dropboxFolderFiles(path, recursive);
   }
 }
 

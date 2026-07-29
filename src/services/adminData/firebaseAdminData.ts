@@ -61,6 +61,7 @@ class FirebaseAdminData implements AdminDataService {
     clientDropboxAuth: true,
     grantSelfAdmin: true,
     publicDataMigration: true,
+    recursiveFolderSync: false,
   };
 
   async stats(): Promise<AdminStats> {
@@ -118,7 +119,7 @@ class FirebaseAdminData implements AdminDataService {
       userId: uid(),
       createdAt: new Date(),
       updatedAt: new Date(),
-      isPublic: true,
+      isPublic: input.isPublic ?? true,
       totalPlaylists: input.playlistIds?.length || 0,
       playlistIds: input.playlistIds || [],
       folderIds: [],
@@ -204,7 +205,7 @@ class FirebaseAdminData implements AdminDataService {
       userId: uid(),
       createdAt: new Date(),
       updatedAt: new Date(),
-      isPublic: true,
+      isPublic: input.isPublic ?? true,
       totalTracks: 0,
       totalDuration: '0:00',
     };
@@ -417,6 +418,17 @@ class FirebaseAdminData implements AdminDataService {
 
   folderStats(path: string): Promise<FolderStats> {
     return dropboxService.getFolderDetails(path);
+  }
+
+  /** Direct children only — the client-side Dropbox listing isn't recursive. */
+  async previewFolderFiles(path: string): Promise<FolderFile[]> {
+    const tracks = await dropboxService.getTracksFromFolder(path);
+    return tracks.map((track) => ({
+      id: track.id,
+      name: track.name,
+      path: track.path || '',
+      duration: track.duration,
+    }));
   }
 }
 

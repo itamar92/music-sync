@@ -27,6 +27,7 @@ export interface FolderSyncEntry {
   displayName: string;
   syncFrequency: string;
   isActive: boolean;
+  includeSubfolders: boolean;
   status: 'pending' | 'syncing' | 'synced' | 'error';
   lastSyncAt?: string | null;
   lastError?: string;
@@ -177,6 +178,7 @@ class AdminApiService {
     displayName?: string;
     syncFrequency?: string;
     isActive?: boolean;
+    includeSubfolders?: boolean;
   }): Promise<FolderSyncEntry> {
     return this.request('/folders', { method: 'POST', body: JSON.stringify(input) });
   }
@@ -213,8 +215,23 @@ class AdminApiService {
     return this.request(`/dropbox/folders?path=${encodeURIComponent(path)}`);
   }
 
-  dropboxFolderStats(path: string): Promise<{ trackCount: number; hasSubfolders: boolean }> {
-    return this.request(`/dropbox/folder-stats?path=${encodeURIComponent(path)}`);
+  dropboxFolderStats(
+    path: string,
+    recursive = false,
+  ): Promise<{ trackCount: number; hasSubfolders: boolean }> {
+    return this.request(
+      `/dropbox/folder-stats?path=${encodeURIComponent(path)}&recursive=${recursive}`,
+    );
+  }
+
+  /** Audio files in a Dropbox path before it becomes a watched folder. */
+  dropboxFolderFiles(
+    path: string,
+    recursive = false,
+  ): Promise<Array<{ id: string; name: string; path: string }>> {
+    return this.request(
+      `/dropbox/folder-files?path=${encodeURIComponent(path)}&recursive=${recursive}`,
+    );
   }
 
   syncFolder(input: {

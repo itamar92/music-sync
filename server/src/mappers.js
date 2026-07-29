@@ -50,6 +50,7 @@ export function toFolderSync(row) {
     displayName: row.display_name || row.name,
     syncFrequency: row.sync_frequency,
     isActive: row.is_active,
+    includeSubfolders: row.include_subfolders ?? false,
     status: row.status,
     lastSyncAt: row.last_sync_at,
     lastError: row.last_error || undefined,

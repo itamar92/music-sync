@@ -2,6 +2,7 @@ import React, { useCallback, useState, useEffect } from 'react';
 import { AddFolderModal } from './AddFolderModal';
 import { Modal } from '../Modal';
 import { adminData, FolderFile } from '../../services/adminData';
+import { ToggleRow } from '../nocturne/Picker';
 import { Icon, IconName } from '../nocturne/icons';
 import { FolderRecord } from './types';
 
@@ -99,6 +100,7 @@ export const FolderSyncManagement: React.FC = () => {
         displayName: editing.displayName || editing.name,
         syncFrequency: editing.syncFrequency || 'manual',
         isActive: editing.isActive ?? true,
+        includeSubfolders: editing.includeSubfolders ?? false,
       });
       setEditing(null);
       await loadFolders();
@@ -290,6 +292,7 @@ export const FolderSyncManagement: React.FC = () => {
                     style={{ fontSize: 11.5, color: 'var(--nc-dim)' }}
                   >
                     {folder.dropboxPath}
+                    {folder.includeSubfolders && ' · incl. subfolders'}
                     {formatLastSync(folder.lastSyncAt) && ` · ${formatLastSync(folder.lastSyncAt)}`}
                   </div>
                 </div>
@@ -402,17 +405,20 @@ export const FolderSyncManagement: React.FC = () => {
               </select>
             </div>
 
-            <label
-              style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 13, cursor: 'pointer' }}
-            >
-              <input
-                type="checkbox"
-                checked={editing.isActive ?? true}
-                onChange={(e) => setEditing({ ...editing, isActive: e.target.checked })}
-                style={{ accentColor: 'var(--nc-tl)' }}
+            <ToggleRow
+              checked={editing.isActive ?? true}
+              onChange={(isActive) => setEditing({ ...editing, isActive })}
+              label="Keep this folder in sync"
+            />
+
+            {adminData.capabilities.recursiveFolderSync && (
+              <ToggleRow
+                checked={editing.includeSubfolders ?? false}
+                onChange={(includeSubfolders) => setEditing({ ...editing, includeSubfolders })}
+                label="Include subfolders"
+                hint="Also pull audio files from every folder inside this one. Takes effect on the next sync."
               />
-              Keep this folder in sync
-            </label>
+            )}
 
             <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
               <button
