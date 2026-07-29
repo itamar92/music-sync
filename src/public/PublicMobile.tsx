@@ -23,11 +23,27 @@ interface PublicMobileProps {
   library: PublicLibrary;
   /** The Dropbox connection pill; rendered in the header beside the mark. */
   syncBadge: React.ReactNode;
+  /** Off inside a shared collection: the recipient has no studio to go to. */
+  showStudioTab?: boolean;
+  /**
+   * What the playlist view's share button offers. Defaults to the playlist's
+   * public URL; a shared collection overrides it with its own link, since the
+   * playlist itself isn't reachable without the token.
+   */
+  playlistLink?: (playlist: Playlist) => string;
 }
 
 const label = (item: { displayName?: string; name: string }) => item.displayName || item.name;
 
-export const PublicMobile: React.FC<PublicMobileProps> = ({ library, syncBadge }) => {
+const publicPlaylistLink = (playlist: Playlist) =>
+  `${window.location.origin}/playlist/${playlist.id}`;
+
+export const PublicMobile: React.FC<PublicMobileProps> = ({
+  library,
+  syncBadge,
+  showStudioTab = true,
+  playlistLink = publicPlaylistLink,
+}) => {
   const navigate = useNavigate();
   const { expanded } = useAudioPlayerContext();
 
@@ -89,6 +105,7 @@ export const PublicMobile: React.FC<PublicMobileProps> = ({ library, syncBadge }
             playlist={library.selectedPlaylist}
             collection={library.selectedCollection}
             onBack={library.backToCollection}
+            playlistLink={playlistLink}
           />
         ) : library.view === 'search' ? (
           <MobileSearch library={library} />
@@ -105,7 +122,7 @@ export const PublicMobile: React.FC<PublicMobileProps> = ({ library, syncBadge }
         style={{
           flexShrink: 0,
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: `repeat(${showStudioTab ? 3 : 2}, 1fr)`,
           borderTop: '1px solid var(--nc-line)',
           background: 'rgba(11,13,22,0.92)',
           backdropFilter: 'blur(14px)',
@@ -124,7 +141,9 @@ export const PublicMobile: React.FC<PublicMobileProps> = ({ library, syncBadge }
           active={library.view === 'search'}
           onClick={library.openSearch}
         />
-        <Tab icon="studio" text="Studio" active={false} onClick={() => navigate('/admin')} />
+        {showStudioTab && (
+          <Tab icon="studio" text="Studio" active={false} onClick={() => navigate('/admin')} />
+        )}
       </nav>
 
       {expanded && <NowPlayingSheet />}
@@ -421,7 +440,8 @@ const MobilePlaylist: React.FC<{
   playlist: Playlist;
   collection: Collection | null;
   onBack: () => void;
-}> = ({ playlist, collection, onBack }) => {
+  playlistLink: (playlist: Playlist) => string;
+}> = ({ playlist, collection, onBack, playlistLink }) => {
   const { tracks, loading } = usePlaylistTracks(playlist);
   const { state, playFromPlaylist, togglePlayPause, progress, seekToFraction } =
     useAudioPlayerContext();
@@ -441,7 +461,7 @@ const MobilePlaylist: React.FC<{
     : false;
 
   const share = async () => {
-    const url = `${window.location.origin}/playlist/${playlist.id}`;
+    const url = playlistLink(playlist);
     if (navigator.share) {
       try {
         await navigator.share({ title: label(playlist), url });

@@ -3,7 +3,7 @@ import { Track, AudioPlayerState } from '../types';
 import { dropboxService } from '../services/dropboxService';
 import { cachedTrackService } from '../services/cachedTrackService';
 import { playlistPreloader } from '../services/playlistPreloader';
-import { publicDataService } from '../services/publicDataService';
+import { publicReader } from '../services/publicReader';
 import { isServerMode } from '../services/dataMode';
 import { useOptionalUser } from './useOptionalUser';
 import { useToast } from './useToast';
@@ -81,14 +81,16 @@ export const useAudioPlayer = () => {
         if (isServerMode) {
           // Containerized deployment: the backend resolves and caches
           // Dropbox temporary links; prefetch the next tracks so skips
-          // start instantly.
-          streamUrl = await publicDataService.getTrackStreamUrl(track.path);
+          // start instantly. Inside a share link this resolves through the
+          // token-scoped endpoints instead of the public ones.
+          const reader = publicReader();
+          streamUrl = await reader.getTrackStreamUrl(track.path);
           const upcoming = playlist
             .slice(index + 1, index + 4)
             .map((t) => t.path || '')
             .filter(Boolean);
           if (upcoming.length) {
-            publicDataService.prefetchStreamUrls(upcoming);
+            reader.prefetchStreamUrls(upcoming);
           }
         // 🚀 PERFORMANCE: Try preloader first for instant playback
         } else if (user?.uid && track.id) {
@@ -317,9 +319,10 @@ export const useAudioPlayer = () => {
 
       // Container mode stores durations but can't measure them server-side, so
       // the first listener to load a track tells the backend what it found.
+      // (A share link reports nothing — its reader's version is a no-op.)
       const track = currentTrackRef.current;
       if (isServerMode && track?.id && !track.durationSeconds) {
-        publicDataService.reportTrackDuration(track.id, event.detail.duration);
+        publicReader().reportTrackDuration(track.id, event.detail.duration);
       }
     };
 

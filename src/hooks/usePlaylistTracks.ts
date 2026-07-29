@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { cachedTrackService } from '../services/cachedTrackService';
-import { publicDataService } from '../services/publicDataService';
+import { publicReader } from '../services/publicReader';
 import { adminApi } from '../services/adminApiService';
 import { isServerMode } from '../services/dataMode';
 import { useOptionalUser } from './useOptionalUser';
@@ -85,13 +85,16 @@ export const usePlaylistTracks = (
 
       try {
         if (isServerMode) {
+          // Inside a share link the reader is token-scoped; everywhere else it
+          // is the public catalogue. The studio asks as an admin either way.
+          const reader = publicReader();
           const serverTracks = options.admin
             ? (await adminApi.listPlaylistTracks(playlist.id)).filter((t) => !t.isExcluded)
-            : await publicDataService.getPlaylistTracks(playlist.id);
+            : await reader.getPlaylistTracks(playlist.id);
           setTracks(serverTracks);
           // Warm the stream-link cache for the top of the list so the first
           // press of play doesn't wait on a Dropbox round-trip.
-          publicDataService.prefetchStreamUrls(
+          reader.prefetchStreamUrls(
             serverTracks
               .slice(0, 5)
               .map((track) => track.path || track.filePath || '')

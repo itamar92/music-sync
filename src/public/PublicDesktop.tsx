@@ -22,11 +22,24 @@ interface PublicDesktopProps {
   library: PublicLibrary;
   /** Rendered into the header's right cluster (sync badge, auth buttons). */
   headerActions: React.ReactNode;
+  /**
+   * What the playlist view's Share button copies. Defaults to the playlist's
+   * public URL; a shared collection overrides it with its own link, since the
+   * playlist itself isn't reachable without the token.
+   */
+  playlistLink?: (playlist: Playlist) => string;
 }
 
 const label = (item: { displayName?: string; name: string }) => item.displayName || item.name;
 
-export const PublicDesktop: React.FC<PublicDesktopProps> = ({ library, headerActions }) => {
+const publicPlaylistLink = (playlist: Playlist) =>
+  `${window.location.origin}/playlist/${playlist.id}`;
+
+export const PublicDesktop: React.FC<PublicDesktopProps> = ({
+  library,
+  headerActions,
+  playlistLink = publicPlaylistLink,
+}) => {
   const { expanded } = useAudioPlayerContext();
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -114,6 +127,7 @@ export const PublicDesktop: React.FC<PublicDesktopProps> = ({ library, headerAct
               playlist={library.selectedPlaylist}
               collection={library.selectedCollection}
               onBack={library.backToCollection}
+              playlistLink={playlistLink}
             />
           ) : library.view === 'collection' && library.selectedCollection ? (
             <CollectionPane library={library} collection={library.selectedCollection} />
@@ -539,7 +553,8 @@ const PlaylistPane: React.FC<{
   playlist: Playlist;
   collection: Collection | null;
   onBack: () => void;
-}> = ({ playlist, collection, onBack }) => {
+  playlistLink: (playlist: Playlist) => string;
+}> = ({ playlist, collection, onBack, playlistLink }) => {
   const { tracks, loading } = usePlaylistTracks(playlist);
   const { state, playFromPlaylist, togglePlayPause, progress, seekToFraction, setContext } =
     useAudioPlayerContext();
@@ -561,7 +576,7 @@ const PlaylistPane: React.FC<{
   const play = (index: number) => playFromPlaylist(tracks, index, context);
 
   const share = async () => {
-    const url = `${window.location.origin}/playlist/${playlist.id}`;
+    const url = playlistLink(playlist);
     try {
       await navigator.clipboard.writeText(url);
       setContext(context);

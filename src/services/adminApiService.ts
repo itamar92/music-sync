@@ -11,6 +11,14 @@ export interface DropboxFolderEntry {
   path: string;
 }
 
+/** A share link for one collection. `revokedAt` set means it is dead. */
+export interface CollectionShare {
+  id: string;
+  token: string;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
 /** A watched Dropbox folder, as the backend reports it. */
 export interface FolderSyncEntry {
   id: string;
@@ -100,6 +108,20 @@ class AdminApiService {
 
   deleteCollection(id: string): Promise<void> {
     return this.request(`/collections/${id}`, { method: 'DELETE' });
+  }
+
+  // Collection share links. "Regenerate" is revokeShare + createCollectionShare;
+  // there is no dedicated endpoint, so the old token dies the moment it's replaced.
+  listCollectionShares(collectionId: string): Promise<CollectionShare[]> {
+    return this.request(`/collections/${collectionId}/shares`);
+  }
+
+  createCollectionShare(collectionId: string): Promise<CollectionShare> {
+    return this.request(`/collections/${collectionId}/shares`, { method: 'POST' });
+  }
+
+  revokeShare(shareId: string): Promise<CollectionShare> {
+    return this.request(`/shares/${shareId}`, { method: 'DELETE' });
   }
 
   // Playlists
