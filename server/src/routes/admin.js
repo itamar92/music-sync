@@ -1,6 +1,6 @@
 // JWT-authenticated admin API.
 // Contract mirrors src/services/adminApiService.ts exactly.
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import express from 'express';
 import jwt from 'jsonwebtoken';
@@ -217,6 +217,56 @@ router.delete('/collections/:id', asyncRoute(async (req, res) => {
   const result = await query('DELETE FROM collections WHERE id = $1', [req.params.id]);
   if (result.rowCount === 0) return res.status(404).json({ error: 'Collection not found' });
   res.json({ success: true });
+}));
+
+// --- collection share links --------------------------------------------------
+
+/**
+ * Share links let one person hear one collection without it becoming public.
+ *
+ * The token is the whole credential, so it is minted here (256 bits of
+ * randomness, url-safe) and never derived from anything guessable. Revoking
+ * stamps `revoked_at` instead of deleting: the row is the record that a link
+ * existed, and "regenerate" in the studio is revoke + create.
+ */
+const toShare = (row) => ({
+  id: row.id,
+  token: row.token,
+  createdAt: row.created_at,
+  revokedAt: row.revoked_at,
+});
+
+router.get('/collections/:id/shares', asyncRoute(async (req, res) => {
+  const { rows } = await query(
+    `SELECT * FROM collection_shares
+     WHERE collection_id = $1
+     ORDER BY created_at DESC`,
+    [req.params.id],
+  );
+  res.json(rows.map(toShare));
+}));
+
+router.post('/collections/:id/shares', asyncRoute(async (req, res) => {
+  const collection = await query('SELECT 1 FROM collections WHERE id = $1', [req.params.id]);
+  if (collection.rowCount === 0) return res.status(404).json({ error: 'Collection not found' });
+
+  const { rows } = await query(
+    'INSERT INTO collection_shares (collection_id, token) VALUES ($1, $2) RETURNING *',
+    [req.params.id, randomBytes(32).toString('base64url')],
+  );
+  res.status(201).json(toShare(rows[0]));
+}));
+
+/** Revoke a link. Idempotent — re-revoking keeps the original timestamp. */
+router.delete('/shares/:id', asyncRoute(async (req, res) => {
+  const { rows } = await query(
+    `UPDATE collection_shares
+     SET revoked_at = COALESCE(revoked_at, now())
+     WHERE id = $1 RETURNING *`,
+    [req.params.id],
+  );
+  if (rows.length === 0) return res.status(404).json({ error: 'Share not found' });
+  res.json(toShare(rows[0]));
 }));
 
 // --- playlists ---------------------------------------------------------------

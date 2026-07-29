@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CreateCollectionModal } from './CreateCollectionModal';
 import { EditCollectionModal } from './EditCollectionModal';
+import { ShareLinksModal } from './ShareLinksModal';
 import { CollectionView } from '../shared/CollectionView';
 import { adminData } from '../../services/adminData';
+import { isServerMode } from '../../services/dataMode';
 import { useToast } from '../../hooks/useToast';
 import { ToastContainer } from '../ui/ToastContainer';
 import { CollectionGlyph } from '../nocturne/WaveMark';
@@ -18,6 +20,8 @@ export const CollectionManagement: React.FC = () => {
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<CollectionRecord | null>(null);
   const [viewing, setViewing] = useState<CollectionRecord | null>(null);
+  // Share links are a container-mode feature; Firebase mode has no endpoints.
+  const [sharing, setSharing] = useState<CollectionRecord | null>(null);
 
   const { toasts, removeToast, showSuccess, showError } = useToast();
 
@@ -183,6 +187,15 @@ export const CollectionManagement: React.FC = () => {
                   >
                     <Icon name="pencil" size={15} />
                   </button>
+                  {isServerMode && (
+                    <button
+                      className="nc-btn nc-btn-ghost nc-btn-icon"
+                      onClick={() => setSharing(item)}
+                      title="Share links"
+                    >
+                      <Icon name="share" size={15} />
+                    </button>
+                  )}
                   <button
                     className="nc-btn nc-btn-ghost nc-btn-icon"
                     style={{ color: 'var(--nc-danger)' }}
@@ -212,6 +225,12 @@ export const CollectionManagement: React.FC = () => {
           setEditing(null);
         }}
         collection={editing}
+      />
+
+      <ShareLinksModal
+        isOpen={Boolean(sharing)}
+        onClose={() => setSharing(null)}
+        collection={sharing}
       />
 
       <ToastContainer toasts={toasts} onDismiss={removeToast} />

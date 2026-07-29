@@ -5,6 +5,7 @@ import { migrate, pool, query, waitForDatabase } from './db.js';
 import { isConfigured, startKeepalive, tokenStatus } from './dropbox.js';
 import adminRoutes from './routes/admin.js';
 import publicRoutes from './routes/public.js';
+import shareRoutes from './routes/share.js';
 import { pruneExpired } from './streamLinks.js';
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -57,6 +58,9 @@ app.get('/api/status', async (_req, res) => {
   });
 });
 
+// Share links mount ahead of the public router so a token can never be read as
+// a public collection id, and so the share rate limiter only sees share traffic.
+app.use('/api/public/share', shareRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/admin', adminRoutes);
 

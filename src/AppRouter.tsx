@@ -5,6 +5,7 @@ import { useAdminRole } from './hooks/useAdminRole';
 import { isServerMode } from './services/dataMode';
 import { AudioPlayerProvider } from './context/AudioPlayerContext';
 import { PublicApp } from './PublicApp';
+import { ShareApp } from './share/ShareApp';
 import { AdminDashboard } from './AdminDashboard';
 import { LoadingSpinner } from './components/LoadingSpinner';
 
@@ -38,6 +39,10 @@ export const AppRouter: React.FC = () => {
           <Route path="/collection/:collectionId" element={<PublicApp />} />
           <Route path="/playlist/:playlistId" element={<PublicApp />} />
           <Route path="/public" element={<PublicApp />} />
+
+          {/* A single collection behind an unguessable link. Not part of the
+              public catalogue and not reachable from it. */}
+          <Route path="/share/:token" element={<ShareApp />} />
 
           {/* One dashboard for both modes. Server mode presents its own JWT
               login inside it; Firebase mode is gated here on auth + admin role
