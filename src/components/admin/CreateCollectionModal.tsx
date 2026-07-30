@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { adminData } from '../../services/adminData';
 import { Modal } from '../Modal';
-import { Segmented, PickRow, DialogActions, FormError } from '../nocturne/Picker';
+import { Segmented, PickRow, DialogActions, FormError, ToggleRow } from '../nocturne/Picker';
 import { CollectionRecord, PickerOption } from './types';
 
 interface CreateCollectionModalProps {
@@ -10,7 +10,7 @@ interface CreateCollectionModalProps {
   onSuccess: (collection: CollectionRecord) => void;
 }
 
-const EMPTY = { name: '', displayName: '', description: '', coverImageUrl: '' };
+const EMPTY = { name: '', displayName: '', description: '', coverImageUrl: '', isPublic: true };
 
 export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
   isOpen,
@@ -67,6 +67,7 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
           displayName: form.displayName.trim(),
           description: form.description.trim(),
           coverImageUrl: form.coverImageUrl.trim(),
+          isPublic: form.isPublic,
           playlistIds: selected,
         })
       );
@@ -147,6 +148,13 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
                 placeholder="https://…"
               />
             </div>
+
+            <ToggleRow
+              checked={form.isPublic}
+              onChange={(isPublic) => setForm({ ...form, isPublic })}
+              label="Visible on the public site"
+              hint="Private collections and their playlists are only reachable through share links."
+            />
 
             <FormError message={error} />
 

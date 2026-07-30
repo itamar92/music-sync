@@ -69,6 +69,8 @@ export interface FolderRecord extends OwnedRecord {
   status?: 'synced' | 'syncing' | 'error' | 'pending' | string;
   syncFrequency?: string;
   isActive?: boolean;
+  /** Pull audio from the whole subtree, not just direct children. */
+  includeSubfolders?: boolean;
   syncedFiles?: number;
   totalFiles?: number;
   lastSyncAt?: RecordTimestamp;

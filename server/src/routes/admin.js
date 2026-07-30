@@ -483,10 +483,12 @@ router.post('/folders', asyncRoute(async (req, res) => {
     || 'Folder';
 
   const { rows } = await query(
-    `INSERT INTO folder_syncs (dropbox_path, name, display_name, sync_frequency, is_active)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO folder_syncs (dropbox_path, name, display_name, sync_frequency, is_active, include_subfolders)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (dropbox_path) DO UPDATE
-       SET display_name = EXCLUDED.display_name, updated_at = now()
+       SET display_name = EXCLUDED.display_name,
+           include_subfolders = EXCLUDED.include_subfolders,
+           updated_at = now()
      RETURNING *`,
     [
       dropboxPath,
@@ -494,6 +496,7 @@ router.post('/folders', asyncRoute(async (req, res) => {
       req.body?.displayName || name,
       req.body?.syncFrequency || 'manual',
       req.body?.isActive === undefined ? true : Boolean(req.body.isActive),
+      Boolean(req.body?.includeSubfolders),
     ],
   );
   res.status(201).json(toFolderSync(rows[0]));
@@ -504,6 +507,7 @@ router.patch('/folders/:id', asyncRoute(async (req, res) => {
     displayName: 'display_name',
     syncFrequency: 'sync_frequency',
     isActive: 'is_active',
+    includeSubfolders: 'include_subfolders',
   });
   if (sets.length === 0) return res.status(400).json({ error: 'No supported fields to update' });
 
@@ -529,10 +533,13 @@ router.delete('/folders/:id', asyncRoute(async (req, res) => {
 
 /** Audio files currently in a watched folder, straight from Dropbox. */
 router.get('/folders/:id/files', asyncRoute(async (req, res) => {
-  const { rows } = await query('SELECT dropbox_path FROM folder_syncs WHERE id = $1', [req.params.id]);
+  const { rows } = await query(
+    'SELECT dropbox_path, include_subfolders FROM folder_syncs WHERE id = $1',
+    [req.params.id],
+  );
   if (rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
 
-  const files = await listAudioFiles(rows[0].dropbox_path);
+  const files = await listAudioFiles(rows[0].dropbox_path, rows[0].include_subfolders);
   res.json(files.map((file, index) => ({
     id: file.id || file.path,
     name: file.name,
@@ -562,8 +569,25 @@ router.get('/dropbox/folders', asyncRoute(async (req, res) => {
  */
 router.get('/dropbox/folder-stats', asyncRoute(async (req, res) => {
   const path = normalizePath(String(req.query.path || ''));
-  const [files, subfolders] = await Promise.all([listAudioFiles(path), listFolders(path)]);
+  const recursive = req.query.recursive === 'true';
+  const [files, subfolders] = await Promise.all([listAudioFiles(path, recursive), listFolders(path)]);
   res.json({ path, trackCount: files.length, hasSubfolders: subfolders.length > 0 });
+}));
+
+/**
+ * Audio files in a Dropbox path that isn't (yet) a watched folder, so the
+ * picker can show what a candidate would sync before the admin commits to it.
+ */
+router.get('/dropbox/folder-files', asyncRoute(async (req, res) => {
+  const path = normalizePath(String(req.query.path || ''));
+  if (!path) return res.status(400).json({ error: 'path is required' });
+
+  const files = await listAudioFiles(path, req.query.recursive === 'true');
+  res.json(files.map((file) => ({
+    id: file.id || file.path,
+    name: file.name,
+    path: file.path,
+  })));
 }));
 
 // --- syncing -----------------------------------------------------------------
@@ -593,7 +617,8 @@ async function materialiseFolderTracks(folderId, playlistId, files = null) {
   const folder = await query('SELECT * FROM folder_syncs WHERE id = $1', [folderId]);
   if (folder.rows.length === 0) return 0;
 
-  const entries = files ?? (await listAudioFiles(folder.rows[0].dropbox_path));
+  const entries =
+    files ?? (await listAudioFiles(folder.rows[0].dropbox_path, folder.rows[0].include_subfolders));
 
   await withTransaction(async (client) => {
     for (const [index, file] of entries.entries()) {
@@ -658,7 +683,7 @@ async function syncFolderById(folderId) {
   );
 
   try {
-    const files = await listAudioFiles(folder.dropbox_path);
+    const files = await listAudioFiles(folder.dropbox_path, folder.include_subfolders);
     const linked = await query(
       'SELECT playlist_id FROM playlist_folders WHERE folder_id = $1',
       [folderId],
@@ -695,7 +720,8 @@ router.post('/sync-folder', asyncRoute(async (req, res) => {
   const folderPath = normalizePath(String(req.body?.folderPath || ''));
   if (!folderPath) return res.status(400).json({ error: 'folderPath is required' });
 
-  const files = await listAudioFiles(folderPath);
+  const includeSubfolders = Boolean(req.body?.includeSubfolders);
+  const files = await listAudioFiles(folderPath, includeSubfolders);
   const folderName = folderPath.split('/').filter(Boolean).pop() || 'Playlist';
   const displayName = String(req.body?.displayName || '').trim() || folderName;
   const collectionId = req.body?.collectionId || null;
@@ -703,14 +729,15 @@ router.post('/sync-folder', asyncRoute(async (req, res) => {
 
   const { playlistId, folderId } = await withTransaction(async (client) => {
     const folder = await client.query(
-      `INSERT INTO folder_syncs (dropbox_path, name, display_name, status, last_sync_at, total_files, synced_files)
-       VALUES ($1, $2, $3, 'synced', now(), $4, $4)
+      `INSERT INTO folder_syncs (dropbox_path, name, display_name, status, last_sync_at, total_files, synced_files, include_subfolders)
+       VALUES ($1, $2, $3, 'synced', now(), $4, $4, $5)
        ON CONFLICT (dropbox_path) DO UPDATE
          SET status = 'synced', last_sync_at = now(), last_error = NULL,
              total_files = EXCLUDED.total_files, synced_files = EXCLUDED.synced_files,
+             include_subfolders = EXCLUDED.include_subfolders,
              updated_at = now()
        RETURNING id`,
-      [folderPath, folderName, displayName, files.length],
+      [folderPath, folderName, displayName, files.length, includeSubfolders],
     );
 
     // Re-syncing the same folder updates the existing playlist in place.

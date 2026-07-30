@@ -51,6 +51,12 @@ export interface AdminCapabilities {
   grantSelfAdmin: boolean;
   /** Firestore-only: backfill isPublic across legacy documents. */
   publicDataMigration: boolean;
+  /**
+   * Container-only: a watched folder can pull audio from its whole subtree.
+   * Firebase mode reads folders directly from the browser and only sees
+   * direct children, so the option is hidden there.
+   */
+  recursiveFolderSync: boolean;
 }
 
 export interface CollectionInput {
@@ -58,6 +64,8 @@ export interface CollectionInput {
   displayName?: string;
   description?: string;
   coverImageUrl?: string;
+  /** Visible on the public site. Defaults to true when omitted. */
+  isPublic?: boolean;
   playlistIds?: string[];
 }
 
@@ -67,6 +75,8 @@ export interface PlaylistInput {
   description?: string;
   coverImageUrl?: string;
   collectionId?: string | null;
+  /** Visible on the public site. Defaults to true when omitted. */
+  isPublic?: boolean;
   folderIds?: string[];
 }
 
@@ -76,6 +86,8 @@ export interface FolderInput {
   displayName?: string;
   syncFrequency?: string;
   isActive?: boolean;
+  /** Pull audio from the whole subtree, not just direct children. */
+  includeSubfolders?: boolean;
 }
 
 export interface AdminDataService {
@@ -113,4 +125,10 @@ export interface AdminDataService {
   browseDropbox(path: string): Promise<DropboxEntry[]>;
   /** Track count and subfolder presence for one path, fetched per row. */
   folderStats(path: string): Promise<FolderStats>;
+  /**
+   * Audio files in a Dropbox path that isn't a watched folder yet, so the
+   * picker can preview what syncing it would bring in. `recursive` includes
+   * the subtree where the backend supports it (see `recursiveFolderSync`).
+   */
+  previewFolderFiles(path: string, recursive?: boolean): Promise<FolderFile[]>;
 }

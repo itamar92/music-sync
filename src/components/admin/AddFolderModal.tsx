@@ -1,9 +1,9 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { useDropbox } from '../../hooks/useDropbox';
-import { adminData, DropboxEntry } from '../../services/adminData';
+import { adminData, DropboxEntry, FolderFile } from '../../services/adminData';
 import { FolderRecord } from './types';
 import { Modal } from '../Modal';
-import { DialogActions, FormError } from '../nocturne/Picker';
+import { DialogActions, FormError, ToggleRow } from '../nocturne/Picker';
 import { Icon } from '../nocturne/icons';
 
 /**
@@ -28,7 +28,7 @@ interface FolderStatsState {
 }
 
 export const AddFolderModal: React.FC<AddFolderModalProps> = ({ isOpen, onClose, onSuccess }) => {
-  const { clientDropboxAuth } = adminData.capabilities;
+  const { clientDropboxAuth, recursiveFolderSync } = adminData.capabilities;
   const clientDropbox = useDropbox();
 
   const [path, setPath] = useState('');
@@ -36,6 +36,9 @@ export const AddFolderModal: React.FC<AddFolderModalProps> = ({ isOpen, onClose,
   const [stats, setStats] = useState<FolderStatsState>({});
   const [selected, setSelected] = useState<DropboxEntry | null>(null);
   const [frequency, setFrequency] = useState('manual');
+  const [includeSubfolders, setIncludeSubfolders] = useState(false);
+  const [preview, setPreview] = useState<FolderFile[] | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [browsing, setBrowsing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -95,9 +98,37 @@ export const AddFolderModal: React.FC<AddFolderModalProps> = ({ isOpen, onClose,
     };
   }, [entries]);
 
+  // Preview what the selected folder would sync, so subfolder tracks aren't a surprise.
+  useEffect(() => {
+    if (!selected) {
+      setPreview(null);
+      return;
+    }
+
+    let cancelled = false;
+    setPreviewLoading(true);
+    (async () => {
+      try {
+        const files = await adminData.previewFolderFiles(selected.path, includeSubfolders);
+        if (!cancelled) setPreview(files);
+      } catch (previewError) {
+        console.error('Failed to preview folder contents:', previewError);
+        if (!cancelled) setPreview([]);
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, includeSubfolders]);
+
   const close = () => {
     setSelected(null);
     setFrequency('manual');
+    setIncludeSubfolders(false);
+    setPreview(null);
     setSearch('');
     setError('');
     setEntries([]);
@@ -172,6 +203,7 @@ export const AddFolderModal: React.FC<AddFolderModalProps> = ({ isOpen, onClose,
           name: selected.name,
           displayName: selected.name,
           syncFrequency: frequency,
+          includeSubfolders,
         })
       );
       close();
@@ -264,24 +296,58 @@ export const AddFolderModal: React.FC<AddFolderModalProps> = ({ isOpen, onClose,
   return (
     <Modal isOpen onClose={close} title="Browse Dropbox" kicker="Folder sync" width={720}>
       {selected && (
-        <div className="nc-notice" style={{ marginBottom: 14 }}>
-          <Icon name="folder" size={16} color="var(--nc-accent-text)" />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="nc-truncate" style={{ fontSize: 13.5, fontWeight: 500 }}>
-              {selected.name}
+        <div style={{ marginBottom: 14 }}>
+          <div className="nc-notice">
+            <Icon name="folder" size={16} color="var(--nc-accent-text)" />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="nc-truncate" style={{ fontSize: 13.5, fontWeight: 500 }}>
+                {selected.name}
+              </div>
+              <div className="nc-truncate nc-mono" style={{ fontSize: 11.5, color: 'var(--nc-dim)' }}>
+                {selected.path}
+              </div>
             </div>
-            <div className="nc-truncate nc-mono" style={{ fontSize: 11.5, color: 'var(--nc-dim)' }}>
-              {selected.path}
-            </div>
+            <button
+              className="nc-btn nc-btn-ghost nc-btn-icon"
+              style={{ width: 26, height: 26 }}
+              onClick={() => setSelected(null)}
+              aria-label="Clear selection"
+            >
+              <Icon name="x" size={13} />
+            </button>
           </div>
-          <button
-            className="nc-btn nc-btn-ghost nc-btn-icon"
-            style={{ width: 26, height: 26 }}
-            onClick={() => setSelected(null)}
-            aria-label="Clear selection"
-          >
-            <Icon name="x" size={13} />
-          </button>
+
+          <div style={{ marginTop: 8, padding: '10px 12px', border: '1px solid var(--nc-line)', borderRadius: 8 }}>
+            <div className="nc-mono" style={{ fontSize: 11, color: 'var(--nc-dim)', marginBottom: 6 }}>
+              {previewLoading
+                ? 'READING FOLDER…'
+                : `${preview?.length ?? 0} TRACKS WILL SYNC${includeSubfolders ? ' (INCLUDING SUBFOLDERS)' : ''}`}
+            </div>
+            {!previewLoading && preview && preview.length > 0 && (
+              <div
+                className="nc-scroll"
+                style={{ maxHeight: 120, overflowY: 'auto', paddingRight: 4 }}
+              >
+                {preview.map((file) => (
+                  <div
+                    key={file.id}
+                    className="nc-truncate"
+                    style={{ fontSize: 12, color: 'var(--nc-mut)', lineHeight: 1.7 }}
+                    title={file.path}
+                  >
+                    {file.name}
+                  </div>
+                ))}
+              </div>
+            )}
+            {!previewLoading && preview && preview.length === 0 && (
+              <div style={{ fontSize: 12, color: 'var(--nc-mut)' }}>
+                No audio files here{recursiveFolderSync && !includeSubfolders
+                  ? ' — try including subfolders below.'
+                  : '.'}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -427,6 +493,17 @@ export const AddFolderModal: React.FC<AddFolderModalProps> = ({ isOpen, onClose,
             <option value="weekly">Weekly</option>
           </select>
         </div>
+
+        {recursiveFolderSync && (
+          <div style={{ marginBottom: 14 }}>
+            <ToggleRow
+              checked={includeSubfolders}
+              onChange={setIncludeSubfolders}
+              label="Include subfolders"
+              hint="Also pull audio files from every folder inside this one."
+            />
+          </div>
+        )}
 
         <FormError message={error} />
 

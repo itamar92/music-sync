@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { adminData } from '../../services/adminData';
 import { Modal } from '../Modal';
-import { Segmented, PickRow, DialogActions, FormError } from '../nocturne/Picker';
+import { Segmented, PickRow, DialogActions, FormError, ToggleRow } from '../nocturne/Picker';
 import { CollectionRecord, PickerOption } from './types';
 
 interface EditCollectionModalProps {
@@ -17,7 +17,12 @@ export const EditCollectionModal: React.FC<EditCollectionModalProps> = ({
   onSuccess,
   collection,
 }) => {
-  const [form, setForm] = useState({ displayName: '', description: '', coverImageUrl: '' });
+  const [form, setForm] = useState({
+    displayName: '',
+    description: '',
+    coverImageUrl: '',
+    isPublic: true,
+  });
   const [selected, setSelected] = useState<string[]>([]);
   const [available, setAvailable] = useState<PickerOption[]>([]);
   const [tab, setTab] = useState<'details' | 'content'>('details');
@@ -30,6 +35,7 @@ export const EditCollectionModal: React.FC<EditCollectionModalProps> = ({
       displayName: collection.displayName || collection.name || '',
       description: collection.description || '',
       coverImageUrl: collection.coverImageUrl || '',
+      isPublic: collection.isPublic ?? true,
     });
     setSelected(collection.playlistIds || []);
   }, [collection]);
@@ -72,6 +78,7 @@ export const EditCollectionModal: React.FC<EditCollectionModalProps> = ({
         displayName: form.displayName.trim() || collection.name,
         description: form.description.trim(),
         coverImageUrl: form.coverImageUrl.trim(),
+        isPublic: form.isPublic,
         playlistIds: selected,
       });
       onSuccess({ ...collection, ...updated });
@@ -138,6 +145,13 @@ export const EditCollectionModal: React.FC<EditCollectionModalProps> = ({
                 placeholder="https://…"
               />
             </div>
+
+            <ToggleRow
+              checked={form.isPublic}
+              onChange={(isPublic) => setForm({ ...form, isPublic })}
+              label="Visible on the public site"
+              hint="Private collections and their playlists are only reachable through share links."
+            />
 
             <FormError message={error} />
             <DialogActions onCancel={close} onConfirm={submit} confirmLabel="Save changes" busy={loading} />
