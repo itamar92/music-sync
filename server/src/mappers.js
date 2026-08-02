@@ -81,6 +81,9 @@ export function toTrack(row) {
     isExcluded: row.is_excluded ?? false,
     sortOrder: row.sort_order ?? row.track_number,
     folderId: row.folder_id || undefined,
+    // When Dropbox last modified the file, as of the most recent sync. Null on
+    // rows no sync has covered yet — the UI shows nothing rather than guessing.
+    dropboxModified: row.dropbox_modified ? new Date(row.dropbox_modified).toISOString() : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

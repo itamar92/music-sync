@@ -6,6 +6,7 @@ import { calculatePlaylistDuration, formatTime } from '../../utils/formatTime';
 import { Track } from '../../types';
 import { Waveform } from '../nocturne/Waveform';
 import { EqBars } from '../nocturne/EqBars';
+import { FreshnessMark } from '../nocturne/FreshnessMark';
 import { Icon } from '../nocturne/icons';
 import { PlaylistRecord } from '../admin/types';
 
@@ -451,6 +452,9 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
                     <span className="nc-truncate" dir="auto" style={{ fontSize: 14 }}>
                       {track.name}
                     </span>
+                    {/* Owners get the exact date behind an ⓘ; a listener only
+                        ever sees the dot, and only while it's fresh. */}
+                    <FreshnessMark track={track} withInfo={canEdit} />
                     {canEdit && (
                       <button
                         className="nc-btn nc-btn-ghost nc-btn-icon"
