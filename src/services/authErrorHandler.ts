@@ -227,7 +227,7 @@ export class AuthErrorHandler {
   /**
    * Perform re-authentication by clearing tokens
    */
-  private static async performReauth(error: AuthError): Promise<void> {
+  private static async performReauth(_error: AuthError): Promise<void> {
     try {
       await tokenManager.clearStoredTokens();
       console.log('🗑️ Invalid tokens cleared, re-authentication required');

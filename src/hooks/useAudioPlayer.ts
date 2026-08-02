@@ -8,13 +8,13 @@ import { isServerMode } from '../services/dataMode';
 import { useOptionalUser } from './useOptionalUser';
 import { useToast } from './useToast';
 import { useDocumentTitle } from './useDocumentTitle';
-import { trackEvent, trackError, trackPerformance } from '../utils/monitoring';
+import { trackEvent, trackError } from '../utils/monitoring';
 
 export const useAudioPlayer = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playlist, setPlaylistState] = useState<Track[]>([]);
   const [user] = useOptionalUser();
-  const { showAuthError, showConnectionRestored, toasts, removeToast } = useToast();
+  const { showAuthError, toasts, removeToast } = useToast();
   const [state, setState] = useState<AudioPlayerState>({
     currentTrack: null,
     currentTrackIndex: 0,

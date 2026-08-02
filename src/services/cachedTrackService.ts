@@ -180,9 +180,6 @@ export class CachedTrackService {
    */
   async refreshFolderCache(userId: string, folderId: string, folderPath: string): Promise<Track[]> {
     try {
-      // Clear existing cache by marking tracks as inactive
-      const existingTracks = await databaseService.getCachedTracks(userId, folderId);
-      
       // Fetch fresh data from Dropbox
       const freshTracks = await dropboxService.getTracksFromFolder(folderPath);
       

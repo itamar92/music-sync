@@ -1,0 +1,19 @@
+# Build output and dependencies.
+dist/
+node_modules/
+
+# Firebase Data Connect SDK, emitted by the generator — not ours to lint.
+dataconnect-generated/
+
+# Cloud Functions carry their own .eslintrc.js (Google style, CommonJS).
+# Lint them with: cd functions && npm run lint
+functions/
+
+# One-off Dropbox OAuth debugging utilities and the pre-rewrite single-file
+# prototype, all documented as dead in CLAUDE.md. Kept in the tree for
+# reference; linting them would only produce noise about code nobody runs.
+dropbox-music-sync.tsx
+generate-refresh-token.js
+quick-fix.js
+quick-token-exchange.js
+test-token.js

@@ -1,5 +1,5 @@
 // Key rotation and migration service for secure token encryption
-import { TokenEncryption, EncryptedData } from './tokenEncryption';
+import { TokenEncryption } from './tokenEncryption';
 import { tokenManager } from './tokenManager';
 import { auth } from './firebase';
 

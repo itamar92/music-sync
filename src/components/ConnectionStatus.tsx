@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Wifi, WifiOff } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, WifiOff } from 'lucide-react';
 
 interface ConnectionStatusProps {
   isConnected: boolean;
