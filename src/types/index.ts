@@ -39,6 +39,11 @@ export interface Track {
   // Curation state, reported by the container backend's admin API.
   isExcluded?: boolean;
   sortOrder?: number;
+  /**
+   * When Dropbox last modified the underlying file, as of the last sync.
+   * Container mode only; null or absent means "no information".
+   */
+  dropboxModified?: string | null;
   isActive?: boolean;
   createdBy?: User;
   createdAt?: string;

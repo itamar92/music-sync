@@ -7,6 +7,7 @@ import { usePlaylistTracks } from '../hooks/usePlaylistTracks';
 import { Waveform } from '../components/nocturne/Waveform';
 import { WaveMark, DisplayMark, CollectionGlyph } from '../components/nocturne/WaveMark';
 import { EqBars } from '../components/nocturne/EqBars';
+import { FreshnessMark } from '../components/nocturne/FreshnessMark';
 import { Icon, IconName } from '../components/nocturne/icons';
 import { MiniPlayer, NowPlayingSheet } from './MobilePlayer';
 import { PublicLibrary } from './usePublicLibrary';
@@ -670,15 +671,18 @@ const MobileTrackRow: React.FC<{
       <EqBars opacity={playing ? 1 : 0} />
     </button>
     <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-      <div
-        onClick={onPlay}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && onPlay()}
-        className="nc-truncate"
-        style={{ fontSize: 13.5, color: 'var(--nc-text)', cursor: 'pointer' }}
-      >
-        {track.name}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <div
+          onClick={onPlay}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === 'Enter' && onPlay()}
+          className="nc-truncate"
+          style={{ fontSize: 13.5, color: 'var(--nc-text)', cursor: 'pointer' }}
+        >
+          {track.name}
+        </div>
+        <FreshnessMark track={track} />
       </div>
       <Waveform
         seed={track.name}

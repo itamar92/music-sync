@@ -701,19 +701,40 @@ async function materialiseFolderTracks(folderId, playlistId, files = null) {
       // (folder_id NULL) that happens to share a file with this folder stays
       // exactly as the admin picked it — never renamed, renumbered or adopted.
       await client.query(
-        `INSERT INTO tracks (playlist_id, folder_id, name, file_path, track_number, sort_order)
-         VALUES ($1, $2, $3, $4, $5, $5)
+        `INSERT INTO tracks (playlist_id, folder_id, name, file_path, track_number, sort_order, dropbox_modified)
+         VALUES ($1, $2, $3, $4, $5, $5, $6)
          ON CONFLICT (playlist_id, file_path) DO UPDATE
            SET name         = EXCLUDED.name,
                folder_id    = EXCLUDED.folder_id,
                track_number = EXCLUDED.track_number,
                updated_at   = now()
            WHERE tracks.folder_id IS NOT NULL`,
-        [playlistId, folderId, parsed.name, file.path, parsed.trackNumber ?? index + 1],
+        [
+          playlistId,
+          folderId,
+          parsed.name,
+          file.path,
+          parsed.trackNumber ?? index + 1,
+          file.modified ?? null,
+        ],
       );
     }
 
     const paths = entries.map((f) => f.path);
+
+    // Freshness belongs to the Dropbox file, not to how the row got here, so it
+    // is written outside the fence above — a hand-picked track sharing one of
+    // these files gets an accurate timestamp without its name or order moving.
+    await client.query(
+      `UPDATE tracks AS t
+       SET dropbox_modified = f.modified
+       FROM (SELECT unnest($2::text[]) AS path, unnest($3::timestamptz[]) AS modified) AS f
+       WHERE t.playlist_id = $1
+         AND t.file_path = f.path
+         AND t.dropbox_modified IS DISTINCT FROM f.modified`,
+      [playlistId, paths, entries.map((f) => f.modified ?? null)],
+    );
+
     const removed = await client.query(
       `DELETE FROM tracks
        WHERE playlist_id = $1 AND folder_id = $2 AND NOT (file_path = ANY($3::text[]))

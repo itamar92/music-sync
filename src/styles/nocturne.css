@@ -52,6 +52,8 @@
   --nc-danger-line: rgba(224, 112, 138, 0.35);
   --nc-danger-wash: rgba(224, 112, 138, 0.1);
   --nc-ok: #7fe3ee;
+  /* Recently-updated-from-Dropbox marker; mint, to stay off the cyan accent. */
+  --nc-fresh: #5fd7a4;
 
   /* ── type ──────────────────────────────────────────────────────────── */
   --nc-font: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -557,6 +559,11 @@ body {
 .nc-dot-live {
   background: var(--nc-cy);
   box-shadow: 0 0 8px var(--nc-cy);
+}
+/* Freshness LED: green so it never reads as "now playing", which is cyan. */
+.nc-dot-fresh {
+  background: var(--nc-fresh);
+  box-shadow: 0 0 8px var(--nc-fresh);
 }
 
 /* ── tables ─────────────────────────────────────────────────────────── */

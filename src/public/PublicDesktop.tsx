@@ -6,6 +6,7 @@ import { usePlaylistTracks } from '../hooks/usePlaylistTracks';
 import { Waveform } from '../components/nocturne/Waveform';
 import { WaveMark, DisplayMark, CollectionGlyph } from '../components/nocturne/WaveMark';
 import { EqBars } from '../components/nocturne/EqBars';
+import { FreshnessMark } from '../components/nocturne/FreshnessMark';
 import { Icon } from '../components/nocturne/icons';
 import { TransportBar, NowPlayingOverlay } from './TransportBar';
 import { PublicLibrary } from './usePublicLibrary';
@@ -805,8 +806,11 @@ const TrackRow: React.FC<TrackRowProps> = ({
       onKeyDown={(e) => e.key === 'Enter' && onPlay()}
       style={{ position: 'relative', minWidth: 0, cursor: 'pointer' }}
     >
-      <div className="nc-truncate" style={{ fontSize: 14, color: 'var(--nc-text)' }}>
-        {track.name}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <span className="nc-truncate" style={{ fontSize: 14, color: 'var(--nc-text)' }}>
+          {track.name}
+        </span>
+        <FreshnessMark track={track} />
       </div>
       <div
         className="nc-truncate nc-mono"
