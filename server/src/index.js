@@ -69,6 +69,11 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 // eslint-disable-next-line no-unused-vars -- Express needs the 4-arg signature.
 app.use((err, req, res, _next) => {
   console.error('[error]', err);
+  // Errors raised with a message written for the person who pressed the button
+  // say so explicitly, and are the only ones passed through verbatim.
+  if (err.expose) {
+    return res.status(err.status || 502).json({ error: err.message });
+  }
   if (err.dropbox) {
     // Detail is actionable for the admin (bad/expired refresh token, rate limit)
     // but must not leak upstream internals to the public site.

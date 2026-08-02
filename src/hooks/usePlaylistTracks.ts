@@ -3,6 +3,8 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { cachedTrackService } from '../services/cachedTrackService';
 import { publicReader } from '../services/publicReader';
+import { publicDataService } from '../services/publicDataService';
+import { shareDataService } from '../services/shareDataService';
 import { adminApi } from '../services/adminApiService';
 import { isServerMode } from '../services/dataMode';
 import { useOptionalUser } from './useOptionalUser';
@@ -26,6 +28,30 @@ interface PlaylistLike {
   excludedTracks?: string[];
 }
 
+/**
+ * Trigger a Dropbox re-pull for one playlist, admin route or public one.
+ *
+ * A share link reads through a token-scoped API that has no sync endpoint, so
+ * there the request is simply skipped — the button is hidden in that context.
+ *
+ * Returns a message to show when the sync itself failed, rather than throwing:
+ * the reload has to happen either way, because a stale-but-present list beats
+ * wiping the view over a Dropbox hiccup.
+ */
+const syncPlaylistFolders = async (
+  playlistId: string,
+  asAdmin: boolean
+): Promise<string | null> => {
+  if (shareDataService.isActive()) return null;
+  try {
+    await (asAdmin ? adminApi.syncPlaylist(playlistId) : publicDataService.syncPlaylist(playlistId));
+    return null;
+  } catch (error) {
+    console.error('Playlist sync failed:', error);
+    return error instanceof Error ? error.message : 'Could not sync from Dropbox.';
+  }
+};
+
 /** Applies a playlist's saved ordering to a flat track list, newcomers last. */
 const applyOrder = (tracks: Track[], order?: string[]): Track[] => {
   if (!order?.length) return tracks;
@@ -48,9 +74,15 @@ interface UsePlaylistTracksResult {
   tracks: Track[];
   loading: boolean;
   error: string | null;
-  /** Re-reads from the source; pass true to bypass the folder cache. */
+  /** Re-reads from the source; pass true to re-pull from Dropbox first. */
   reload: (refreshCache?: boolean) => Promise<void>;
   setTracks: React.Dispatch<React.SetStateAction<Track[]>>;
+  /**
+   * Whether `reload(true)` can actually reach Dropbox, so a view knows whether
+   * to offer a sync control. False inside a share link, whose token-scoped API
+   * has no sync endpoint.
+   */
+  canSync: boolean;
 }
 
 interface UsePlaylistTracksOptions {
@@ -85,6 +117,15 @@ export const usePlaylistTracks = (
 
       try {
         if (isServerMode) {
+          // `refreshCache` here means "go and look at Dropbox again", not "skip
+          // a cache": in container mode the track list is materialised in
+          // Postgres by a sync, so re-reading it without syncing first would
+          // return exactly what is already on screen. That was the bug behind
+          // "the Sync button does nothing".
+          const syncFailure = refreshCache
+            ? await syncPlaylistFolders(playlist.id, Boolean(options.admin))
+            : null;
+
           // Inside a share link the reader is token-scoped; everywhere else it
           // is the public catalogue. The studio asks as an admin either way.
           const reader = publicReader();
@@ -92,6 +133,9 @@ export const usePlaylistTracks = (
             ? (await adminApi.listPlaylistTracks(playlist.id)).filter((t) => !t.isExcluded)
             : await reader.getPlaylistTracks(playlist.id);
           setTracks(serverTracks);
+          // The list still loaded, so this is reported alongside it rather than
+          // instead of it.
+          if (syncFailure) setError(syncFailure);
           // Warm the stream-link cache for the top of the list so the first
           // press of play doesn't wait on a Dropbox round-trip.
           reader.prefetchStreamUrls(
@@ -188,5 +232,9 @@ export const usePlaylistTracks = (
     return () => window.removeEventListener('trackDurationsUpdated', handleDurations);
   }, []);
 
-  return { tracks, loading, error, reload: load, setTracks };
+  // Firebase mode has always been able to re-list Dropbox from a playlist view;
+  // container mode now can too, except inside a share link.
+  const canSync = isServerMode ? !shareDataService.isActive() : true;
+
+  return { tracks, loading, error, reload: load, setTracks, canSync };
 };

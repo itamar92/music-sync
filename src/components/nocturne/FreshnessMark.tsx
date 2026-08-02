@@ -3,27 +3,28 @@ import { Icon } from './icons';
 import { describeFileUpdated, isRecentlyUpdated } from '../../utils/trackFreshness';
 
 /**
- * "This file changed in Dropbox recently" — a lit green LED, and in the studio
- * an ⓘ carrying the exact date.
+ * When the Dropbox file behind a track last changed: a lit green LED while that
+ * was recent, plus an ⓘ carrying the exact date.
  *
- * Deliberately quiet: a dot the eye can skip, never a badge that competes with
- * the track name. Renders nothing at all when there is no timestamp to report,
- * so pre-migration rows and hand-picked files simply look unremarkable rather
+ * Shown to listeners as well as to the owner. The date is the point — a listener
+ * wants to know whether they're hearing the latest mix — and gating the ⓘ to the
+ * studio meant a track outside the freshness window showed nothing at all on the
+ * public site.
+ *
+ * Renders nothing when there is no timestamp to report, so rows that predate the
+ * feature and hand-picked files no sync has covered look unremarkable rather
  * than looking stale.
  */
 
 interface FreshnessMarkProps {
   track: { dropboxModified?: string | null };
-  /** Add the ⓘ affordance, which shows the date even outside the window. */
-  withInfo?: boolean;
 }
 
-export const FreshnessMark: React.FC<FreshnessMarkProps> = ({ track, withInfo = false }) => {
+export const FreshnessMark: React.FC<FreshnessMarkProps> = ({ track }) => {
   const updated = describeFileUpdated(track);
   if (!updated) return null;
 
   const fresh = isRecentlyUpdated(track);
-  if (!fresh && !withInfo) return null;
 
   return (
     <span
@@ -38,7 +39,12 @@ export const FreshnessMark: React.FC<FreshnessMarkProps> = ({ track, withInfo = 
           aria-label={`Recently updated. ${updated}`}
         />
       )}
-      {withInfo && <Icon name="info" size={13} color="var(--nc-dim)" label={updated} />}
+      <Icon
+        name="info"
+        size={13}
+        color={fresh ? 'var(--nc-fresh)' : 'var(--nc-dim)'}
+        label={updated}
+      />
     </span>
   );
 };

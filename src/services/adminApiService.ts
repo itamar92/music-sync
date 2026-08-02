@@ -1,6 +1,6 @@
 // Admin client for the container backend (server/). Only used when
 // VITE_DATA_MODE=server. Auth is a backend-issued JWT kept in localStorage.
-import { Track } from '../types';
+import { PlaylistSyncResult, Track } from '../types';
 import { CollectionRecord, PlaylistRecord } from '../components/admin/types';
 
 const TOKEN_KEY = 'musicsync_admin_token';
@@ -146,6 +146,14 @@ class AdminApiService {
     },
   ): Promise<PlaylistRecord> {
     return this.request('/playlists', { method: 'POST', body: JSON.stringify(input) });
+  }
+
+  /**
+   * Re-pull every Dropbox folder behind a playlist. Ignores the cooldown the
+   * public route applies — an admin pressing sync means it.
+   */
+  syncPlaylist(playlistId: string): Promise<PlaylistSyncResult> {
+    return this.request(`/playlists/${playlistId}/sync`, { method: 'POST' });
   }
 
   /** Append hand-picked Dropbox files to a playlist as folder-less tracks. */

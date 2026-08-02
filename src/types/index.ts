@@ -50,6 +50,23 @@ export interface Track {
   updatedAt?: string;
 }
 
+/**
+ * Outcome of asking the backend to re-pull a playlist's Dropbox folders.
+ *
+ * `synced: false` is a success, not a failure: `no-folders` means the playlist
+ * is entirely hand-picked, and `cooldown` means the folders were re-read too
+ * recently to ask Dropbox again. Container mode only.
+ */
+export interface PlaylistSyncResult {
+  success: boolean;
+  synced: boolean;
+  reason?: 'no-folders' | 'cooldown';
+  folderCount: number;
+  trackCount?: number;
+  failedCount?: number;
+  retryAfterMs?: number;
+}
+
 export interface Folder {
   id: string;
   name: string;

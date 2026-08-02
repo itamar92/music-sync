@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Collection, Playlist, Track } from '../types';
 import { calculatePlaylistDuration, formatTime } from '../utils/formatTime';
 import { useAudioPlayerContext } from '../context/AudioPlayerContext';
@@ -556,9 +556,10 @@ const PlaylistPane: React.FC<{
   onBack: () => void;
   playlistLink: (playlist: Playlist) => string;
 }> = ({ playlist, collection, onBack, playlistLink }) => {
-  const { tracks, loading } = usePlaylistTracks(playlist);
+  const { tracks, loading, error, reload, canSync } = usePlaylistTracks(playlist);
   const { state, playFromPlaylist, togglePlayPause, progress, seekToFraction, setContext } =
     useAudioPlayerContext();
+  const [syncing, setSyncing] = useState(false);
 
   const context = useMemo(
     () => ({
@@ -583,6 +584,17 @@ const PlaylistPane: React.FC<{
       setContext(context);
     } catch {
       window.prompt('Copy this link', url);
+    }
+  };
+
+  // Anyone can ask for a re-pull; the backend applies a per-folder cooldown, so
+  // a bored visitor holding the button down costs one Dropbox call a minute.
+  const sync = async () => {
+    setSyncing(true);
+    try {
+      await reload(true);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -651,6 +663,22 @@ const PlaylistPane: React.FC<{
               <Icon name="share" size={15} />
               Share link
             </button>
+            {canSync && (
+              <button
+                className="nc-btn"
+                style={{ height: 38, borderRadius: 999 }}
+                onClick={sync}
+                disabled={syncing || loading}
+                title="Check Dropbox for newer versions of these files"
+              >
+                <Icon
+                  name="refresh"
+                  size={15}
+                  style={syncing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
+                />
+                {syncing ? 'Syncing…' : 'Sync'}
+              </button>
+            )}
             <span className="nc-mono" style={{ fontSize: 11.5, color: 'var(--nc-dim)' }}>
               {loading ? 'LOADING…' : `${tracks.length} TRACKS · ${totalDuration}`}
             </span>
@@ -659,6 +687,13 @@ const PlaylistPane: React.FC<{
       </div>
 
       <div style={{ padding: '0 40px 46px' }}>
+        {error && (
+          <p className="nc-tag nc-tag-danger" style={{ marginBottom: 16 }} role="status">
+            <Icon name="warning" size={13} />
+            {error}
+          </p>
+        )}
+
         <div
           className="nc-mono"
           style={{

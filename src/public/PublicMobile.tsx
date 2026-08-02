@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Collection, Playlist, Track } from '../types';
 import { calculatePlaylistDuration, formatTime } from '../utils/formatTime';
@@ -443,9 +443,10 @@ const MobilePlaylist: React.FC<{
   onBack: () => void;
   playlistLink: (playlist: Playlist) => string;
 }> = ({ playlist, collection, onBack, playlistLink }) => {
-  const { tracks, loading } = usePlaylistTracks(playlist);
+  const { tracks, loading, error, reload, canSync } = usePlaylistTracks(playlist);
   const { state, playFromPlaylist, togglePlayPause, progress, seekToFraction } =
     useAudioPlayerContext();
+  const [syncing, setSyncing] = useState(false);
 
   const context = useMemo(
     () => ({
@@ -475,6 +476,17 @@ const MobilePlaylist: React.FC<{
       await navigator.clipboard.writeText(url);
     } catch {
       window.prompt('Copy this link', url);
+    }
+  };
+
+  // Anyone can ask for a re-pull; the backend applies a per-folder cooldown, so
+  // a bored visitor tapping repeatedly costs one Dropbox call a minute.
+  const sync = async () => {
+    setSyncing(true);
+    try {
+      await reload(true);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -558,6 +570,21 @@ const MobilePlaylist: React.FC<{
           >
             <Icon name="share" size={16} />
           </button>
+          {canSync && (
+            <button
+              className="nc-btn"
+              style={{ width: 44, height: 44, borderRadius: 999, padding: 0 }}
+              onClick={sync}
+              disabled={syncing || loading}
+              aria-label="Check Dropbox for newer versions of these files"
+            >
+              <Icon
+                name="refresh"
+                size={16}
+                style={syncing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
+              />
+            </button>
+          )}
           <span className="nc-mono" style={{ fontSize: 10.5, color: 'var(--nc-dim)' }}>
             {loading ? 'LOADING…' : `${tracks.length} · ${calculatePlaylistDuration(tracks)}`}
           </span>
@@ -565,6 +592,16 @@ const MobilePlaylist: React.FC<{
       </div>
 
       <div style={{ padding: '14px 8px 0', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {error && (
+          <p
+            className="nc-tag nc-tag-danger"
+            style={{ margin: '0 10px 10px' }}
+            role="status"
+          >
+            <Icon name="warning" size={13} />
+            {error}
+          </p>
+        )}
         {loading && (
           <div style={{ padding: 32, display: 'flex', justifyContent: 'center' }}>
             <div className="nc-spinner" />
