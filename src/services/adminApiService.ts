@@ -139,9 +139,24 @@ class AdminApiService {
   }
 
   createPlaylist(
-    input: Partial<PlaylistRecord> & { name: string; folderIds?: string[] },
+    input: Partial<PlaylistRecord> & {
+      name: string;
+      folderIds?: string[];
+      tracks?: Array<{ path: string; name: string }>;
+    },
   ): Promise<PlaylistRecord> {
     return this.request('/playlists', { method: 'POST', body: JSON.stringify(input) });
+  }
+
+  /** Append hand-picked Dropbox files to a playlist as folder-less tracks. */
+  addPlaylistTracks(
+    playlistId: string,
+    files: Array<{ path: string; name: string }>,
+  ): Promise<PlaylistRecord> {
+    return this.request(`/playlists/${playlistId}/tracks`, {
+      method: 'POST',
+      body: JSON.stringify({ files }),
+    });
   }
 
   // Tracks

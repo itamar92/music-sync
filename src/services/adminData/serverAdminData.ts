@@ -10,6 +10,7 @@ import {
   FolderFile,
   FolderInput,
   FolderStats,
+  PickedFile,
   PlaylistInput,
 } from './types';
 
@@ -26,6 +27,7 @@ class ServerAdminData implements AdminDataService {
     grantSelfAdmin: false,
     publicDataMigration: false,
     recursiveFolderSync: true,
+    trackPicking: true,
   };
 
   async stats(): Promise<AdminStats> {
@@ -101,6 +103,10 @@ class ServerAdminData implements AdminDataService {
 
   async removeTrack(playlistId: string, trackId: string): Promise<void> {
     await adminApi.removeTrack(playlistId, trackId);
+  }
+
+  async addTracks(playlistId: string, files: PickedFile[]): Promise<PlaylistRecord> {
+    return this.withTrackCount(await adminApi.addPlaylistTracks(playlistId, files));
   }
 
   // --- folders ---------------------------------------------------------------

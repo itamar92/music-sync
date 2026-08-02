@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { adminData } from '../../services/adminData';
+import { adminData, PickedFile } from '../../services/adminData';
 import { Modal } from '../Modal';
 import { Segmented, PickRow, DialogActions, FormError, ToggleRow } from '../nocturne/Picker';
+import { TrackPicker } from './TrackPicker';
 import { PlaylistRecord, PickerOption } from './types';
+
+type PlaylistTab = 'details' | 'folders' | 'tracks';
 
 interface EditPlaylistModalProps {
   isOpen: boolean;
@@ -29,8 +32,9 @@ export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
   const [collections, setCollections] = useState<PickerOption[]>([]);
   const [folders, setFolders] = useState<PickerOption[]>([]);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
+  const [picks, setPicks] = useState<PickedFile[]>([]);
   const [form, setForm] = useState(EMPTY);
-  const [tab, setTab] = useState<'details' | 'folders'>('details');
+  const [tab, setTab] = useState<PlaylistTab>('details');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -73,6 +77,7 @@ export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
   const close = () => {
     setForm(EMPTY);
     setSelectedFolders([]);
+    setPicks([]);
     setTab('details');
     setError('');
     onClose();
@@ -93,7 +98,7 @@ export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
     setError('');
 
     try {
-      const updated = await adminData.updatePlaylist(playlist.id, {
+      let updated = await adminData.updatePlaylist(playlist.id, {
         name: form.name.trim(),
         displayName: form.displayName.trim() || form.name.trim(),
         description: form.description.trim(),
@@ -102,6 +107,18 @@ export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
         isPublic: form.isPublic,
         folderIds: selectedFolders,
       });
+      if (picks.length > 0) {
+        try {
+          updated = await adminData.addTracks(playlist.id, picks);
+        } catch (addError) {
+          // The detail edits above already saved; only the picks failed.
+          console.error('Error adding picked tracks:', addError);
+          setError('Details saved, but adding the picked songs failed. Please try again.');
+          setLoading(false);
+          onSuccess({ ...playlist, ...updated });
+          return;
+        }
+      }
       onSuccess({ ...playlist, ...updated });
       close();
     } catch (submitError) {
@@ -116,13 +133,16 @@ export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
 
   return (
     <Modal isOpen={isOpen} onClose={close} title="Edit playlist" kicker="Studio" width={560}>
-      <Segmented<'details' | 'folders'>
+      <Segmented<PlaylistTab>
         label="Playlist sections"
         value={tab}
         onChange={setTab}
         options={[
           { value: 'details', label: 'Details' },
           { value: 'folders', label: `Folders (${selectedFolders.length})` },
+          ...(adminData.capabilities.trackPicking
+            ? [{ value: 'tracks' as const, label: `Add songs (${picks.length})` }]
+            : []),
         ]}
       />
 
@@ -208,6 +228,27 @@ export const EditPlaylistModal: React.FC<EditPlaylistModalProps> = ({
 
             <FormError message={error} />
             <DialogActions onCancel={close} onConfirm={submit} confirmLabel="Save changes" busy={loading} />
+          </div>
+        ) : tab === 'tracks' ? (
+          <div>
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--nc-mut)' }}>
+              Songs checked here are added to the playlist when you save. Remove
+              songs from the playlist's track list.
+            </p>
+
+            <TrackPicker selected={picks} onChange={setPicks} />
+
+            <div style={{ marginTop: 14 }}>
+              <FormError message={error} />
+            </div>
+
+            <DialogActions
+              onCancel={() => setTab('details')}
+              secondaryLabel="Back"
+              onConfirm={submit}
+              confirmLabel="Save changes"
+              busy={loading}
+            />
           </div>
         ) : (
           <div>

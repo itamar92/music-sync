@@ -47,9 +47,10 @@ updated or removed by a sync.
   `is_excluded` soft-hide for folder-synced tracks.
 - Streaming: unchanged — public stream endpoints already serve any track that
   belongs to a public playlist.
-- Accepted edge case: picking a song, then attaching its parent folder to the
-  same playlist, lets the sync adopt the row (no duplicates thanks to the
-  unique constraint).
+- Edge case: when a picked song's file also lives in a folder attached to the
+  same playlist, the folder sync's upsert is fenced (`WHERE tracks.folder_id
+  IS NOT NULL`) so the picked row is never renamed, renumbered or adopted —
+  the unique constraint guarantees a single row, owned by the admin's pick.
 
 ### 3. Picker UI
 

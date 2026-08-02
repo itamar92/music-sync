@@ -62,7 +62,13 @@ class FirebaseAdminData implements AdminDataService {
     grantSelfAdmin: true,
     publicDataMigration: true,
     recursiveFolderSync: false,
+    trackPicking: false,
   };
+
+  async addTracks(): Promise<never> {
+    // Guarded by capabilities.trackPicking — the studio never offers this here.
+    throw new Error('Hand-picked tracks require the container backend');
+  }
 
   async stats(): Promise<AdminStats> {
     const [collections, playlists, folders] = await Promise.all([
