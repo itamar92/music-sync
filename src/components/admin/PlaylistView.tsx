@@ -560,7 +560,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
                         </div>
                       ) : (
                         <div className="flex items-center space-x-2">
-                          <span className="text-white">{track.name}</span>
+                          <span className="text-white" dir="auto">{track.name}</span>
                           <button
                             onClick={() => {
                               setEditingTrackId(track.id);

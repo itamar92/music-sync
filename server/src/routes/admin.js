@@ -296,6 +296,7 @@ router.post('/playlists', asyncRoute(async (req, res) => {
   if (!name) return res.status(400).json({ error: 'name is required' });
 
   const folderIds = Array.isArray(req.body?.folderIds) ? req.body.folderIds : [];
+  const picks = cleanPickedFiles(req.body?.tracks);
 
   const id = await withTransaction(async (client) => {
     const { rows } = await client.query(
@@ -326,6 +327,7 @@ router.post('/playlists', asyncRoute(async (req, res) => {
   // creation. Dropbox being unreachable must not fail a request whose record
   // has already been written — the folder just stays unsynced until next time.
   const warning = await fillFromFolders(folderIds, id);
+  if (picks.length) await insertPickedTracks(id, picks);
 
   const playlist = await reloadPlaylist(id);
   res.status(201).json({ ...playlist, folderIds, ...(warning ? { warning } : {}) });
@@ -414,6 +416,27 @@ router.get('/playlists/:id/tracks', asyncRoute(async (req, res) => {
   res.json(rows.map(toTrack));
 }));
 
+/**
+ * Add hand-picked Dropbox files to a playlist. Picked tracks carry no
+ * folder_id, so no folder sync will ever add to, rename, or prune them —
+ * the playlist holds exactly what the admin chose.
+ */
+router.post('/playlists/:id/tracks', asyncRoute(async (req, res) => {
+  const files = cleanPickedFiles(req.body?.files);
+  if (files.length === 0) {
+    return res.status(400).json({ error: 'files array with Dropbox paths is required' });
+  }
+
+  const playlist = await query('SELECT 1 FROM playlists WHERE id = $1', [req.params.id]);
+  if (playlist.rowCount === 0) return res.status(404).json({ error: 'Playlist not found' });
+
+  await insertPickedTracks(req.params.id, files);
+
+  const reloaded = await reloadPlaylist(req.params.id);
+  const [withFolders] = await withFolderIds([reloaded]);
+  res.status(201).json(withFolders);
+}));
+
 router.patch('/tracks/:id', asyncRoute(async (req, res) => {
   const { sets, values } = buildPatch(req.body, {
     displayName: 'display_name',
@@ -433,15 +456,25 @@ router.patch('/tracks/:id', asyncRoute(async (req, res) => {
   res.json(toTrack(rows[0]));
 }));
 
-/** Hide a track from a playlist. Kept, not deleted — a re-sync would restore it. */
+/**
+ * Remove a track from a playlist. Folder-synced tracks are hidden, not
+ * deleted — a re-sync would only restore them. Hand-picked tracks (no
+ * folder_id) have nothing that could bring them back, so the row goes.
+ */
 router.delete('/playlists/:playlistId/tracks/:trackId', asyncRoute(async (req, res) => {
-  const { rows } = await query(
-    `UPDATE tracks SET is_excluded = true, updated_at = now()
-     WHERE id = $1 AND playlist_id = $2 RETURNING file_path`,
+  const existing = await query(
+    'SELECT folder_id, file_path FROM tracks WHERE id = $1 AND playlist_id = $2',
     [req.params.trackId, req.params.playlistId],
   );
-  if (rows.length === 0) return res.status(404).json({ error: 'Track not found' });
-  forget(rows[0].file_path);
+  if (existing.rows.length === 0) return res.status(404).json({ error: 'Track not found' });
+
+  if (existing.rows[0].folder_id) {
+    await query('UPDATE tracks SET is_excluded = true, updated_at = now() WHERE id = $1',
+      [req.params.trackId]);
+  } else {
+    await query('DELETE FROM tracks WHERE id = $1', [req.params.trackId]);
+  }
+  forget(existing.rows[0].file_path);
   res.json({ success: true });
 }));
 
@@ -592,18 +625,59 @@ router.get('/dropbox/folder-files', asyncRoute(async (req, res) => {
 
 // --- syncing -----------------------------------------------------------------
 
-/** "01 - Artist - Title.mp3" -> { name, artist, trackNumber }. */
+/**
+ * "01 - שיר Finale.mp3" -> { name: "שיר Finale", trackNumber: 1 }.
+ *
+ * Only the extension and a leading track number are stripped — the rest of the
+ * filename is the track name verbatim, whatever script it's in. Guessing an
+ * artist from " - " separators used to swallow everything left of the dash
+ * (invisible in the UI), which read as "Hebrew names get removed".
+ */
 function parseTrackName(fileName) {
   const base = fileName.replace(/\.[^.]+$/, '').trim();
   const numbered = base.match(/^(\d{1,3})\s*[-._)]\s*(.+)$/);
-  const trackNumber = numbered ? Number(numbered[1]) : null;
-  const rest = numbered ? numbered[2].trim() : base;
+  return {
+    name: numbered ? numbered[2].trim() : base,
+    trackNumber: numbered ? Number(numbered[1]) : null,
+  };
+}
 
-  const split = rest.split(/\s+-\s+/);
-  if (split.length >= 2) {
-    return { artist: split[0].trim(), name: split.slice(1).join(' - ').trim(), trackNumber };
-  }
-  return { artist: null, name: rest, trackNumber };
+/** Validate a request's picked-file list down to { path, name } rows. */
+function cleanPickedFiles(input) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((file) => ({
+      path: normalizePath(String(file?.path || '').trim()),
+      name: String(file?.name || '').trim(),
+    }))
+    .filter((file) => file.path);
+}
+
+/**
+ * Append hand-picked files to a playlist as folder-less track rows.
+ * Numbering continues after the playlist's current tail so picks land at the
+ * end in the order they were chosen. Re-picking an existing path is a no-op.
+ */
+async function insertPickedTracks(playlistId, files) {
+  await withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT COALESCE(MAX(GREATEST(COALESCE(sort_order, 0), COALESCE(track_number, 0))), 0) AS tail
+       FROM tracks WHERE playlist_id = $1`,
+      [playlistId],
+    );
+    let position = Number(rows[0].tail);
+
+    for (const file of files) {
+      const parsed = parseTrackName(file.name || file.path.split('/').pop() || '');
+      position += 1;
+      await client.query(
+        `INSERT INTO tracks (playlist_id, name, file_path, track_number, sort_order)
+         VALUES ($1, $2, $3, $4, $4)
+         ON CONFLICT (playlist_id, file_path) DO NOTHING`,
+        [playlistId, parsed.name || 'Untitled', file.path, position],
+      );
+    }
+  });
 }
 
 /**
@@ -623,16 +697,19 @@ async function materialiseFolderTracks(folderId, playlistId, files = null) {
   await withTransaction(async (client) => {
     for (const [index, file] of entries.entries()) {
       const parsed = parseTrackName(file.name);
+      // The DO UPDATE is fenced to folder-owned rows: a hand-picked track
+      // (folder_id NULL) that happens to share a file with this folder stays
+      // exactly as the admin picked it — never renamed, renumbered or adopted.
       await client.query(
-        `INSERT INTO tracks (playlist_id, folder_id, name, artist, file_path, track_number, sort_order)
-         VALUES ($1, $2, $3, $4, $5, $6, $6)
+        `INSERT INTO tracks (playlist_id, folder_id, name, file_path, track_number, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $5)
          ON CONFLICT (playlist_id, file_path) DO UPDATE
            SET name         = EXCLUDED.name,
-               artist       = EXCLUDED.artist,
                folder_id    = EXCLUDED.folder_id,
                track_number = EXCLUDED.track_number,
-               updated_at   = now()`,
-        [playlistId, folderId, parsed.name, parsed.artist, file.path, parsed.trackNumber ?? index + 1],
+               updated_at   = now()
+           WHERE tracks.folder_id IS NOT NULL`,
+        [playlistId, folderId, parsed.name, file.path, parsed.trackNumber ?? index + 1],
       );
     }
 

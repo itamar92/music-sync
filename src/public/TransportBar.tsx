@@ -83,6 +83,7 @@ export const TransportBar: React.FC = () => {
         <div style={{ minWidth: 0 }}>
           <div
             className="nc-truncate"
+            dir="auto"
             style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--nc-text)' }}
           >
             {track?.name || 'MusicSync'}
@@ -278,6 +279,7 @@ export const NowPlayingOverlay: React.FC = () => {
             <div style={{ minWidth: 0 }}>
               <h1
                 className="nc-h1"
+                dir="auto"
                 style={{ fontSize: 34, marginBottom: 8, lineHeight: 1.1 }}
               >
                 {track.name}
@@ -393,6 +395,7 @@ export const QueueRow: React.FC<QueueRowProps> = ({ index, name, duration, curre
     </span>
     <span
       className="nc-truncate"
+      dir="auto"
       style={{ position: 'relative', flex: 1, minWidth: 0, fontSize: 13, color: 'var(--nc-text)' }}
     >
       {name}

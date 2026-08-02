@@ -39,6 +39,12 @@ export interface FolderFile {
   duration?: string;
 }
 
+/** One hand-picked Dropbox audio file headed into a playlist. */
+export interface PickedFile {
+  path: string;
+  name: string;
+}
+
 /** What a given backend can actually offer, so the UI hides the rest. */
 export interface AdminCapabilities {
   /**
@@ -57,6 +63,11 @@ export interface AdminCapabilities {
    * direct children, so the option is hidden there.
    */
   recursiveFolderSync: boolean;
+  /**
+   * Container-only: playlists can hold individual hand-picked Dropbox files
+   * (no folder sync involved). Hides the Songs tab where unsupported.
+   */
+  trackPicking: boolean;
 }
 
 export interface CollectionInput {
@@ -78,6 +89,8 @@ export interface PlaylistInput {
   /** Visible on the public site. Defaults to true when omitted. */
   isPublic?: boolean;
   folderIds?: string[];
+  /** Individual Dropbox files to seed the playlist with (see `trackPicking`). */
+  tracks?: PickedFile[];
 }
 
 export interface FolderInput {
@@ -113,6 +126,11 @@ export interface AdminDataService {
   setTrackOrder(playlistId: string, trackIds: string[]): Promise<void>;
   /** Hide a track from the playlist without deleting the file. */
   removeTrack(playlistId: string, trackId: string): Promise<void>;
+  /**
+   * Append hand-picked Dropbox files to a playlist (see `trackPicking`).
+   * Returns the playlist with refreshed totals.
+   */
+  addTracks(playlistId: string, files: PickedFile[]): Promise<PlaylistRecord>;
 
   listFolders(): Promise<FolderRecord[]>;
   addFolder(input: FolderInput): Promise<FolderRecord>;

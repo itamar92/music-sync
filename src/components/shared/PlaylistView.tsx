@@ -220,7 +220,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
-              <h1 className="nc-h1" style={{ fontSize: 38 }}>
+              <h1 className="nc-h1" dir="auto" style={{ fontSize: 38 }}>
                 {title}
               </h1>
               {canEdit && (
@@ -262,7 +262,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
-              <p style={{ margin: 0, fontSize: 14, color: 'var(--nc-mut)' }}>{artist}</p>
+              <p dir="auto" style={{ margin: 0, fontSize: 14, color: 'var(--nc-mut)' }}>{artist}</p>
               {canEdit && (
                 <button
                   className="nc-btn nc-btn-ghost nc-btn-icon"
@@ -448,7 +448,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                    <span className="nc-truncate" style={{ fontSize: 14 }}>
+                    <span className="nc-truncate" dir="auto" style={{ fontSize: 14 }}>
                       {track.name}
                     </span>
                     {canEdit && (

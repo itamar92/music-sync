@@ -188,7 +188,7 @@ export const FolderSyncManagement: React.FC = () => {
                 <span className="nc-mono" style={{ fontSize: 11.5, color: 'var(--nc-dim)' }}>
                   {String(index + 1).padStart(2, '0')}
                 </span>
-                <span className="nc-truncate" style={{ fontSize: 13.5 }}>
+                <span className="nc-truncate" dir="auto" style={{ fontSize: 13.5 }}>
                   {file.name}
                 </span>
                 <span

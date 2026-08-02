@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { adminData } from '../../services/adminData';
+import { adminData, PickedFile } from '../../services/adminData';
 import { Modal } from '../Modal';
 import { Segmented, PickRow, DialogActions, FormError, ToggleRow } from '../nocturne/Picker';
+import { TrackPicker } from './TrackPicker';
 import { PlaylistRecord, PickerOption } from './types';
+
+type PlaylistTab = 'details' | 'folders' | 'tracks';
 
 interface CreatePlaylistModalProps {
   isOpen: boolean;
@@ -27,8 +30,9 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   const [collections, setCollections] = useState<PickerOption[]>([]);
   const [folders, setFolders] = useState<PickerOption[]>([]);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
+  const [picks, setPicks] = useState<PickedFile[]>([]);
   const [form, setForm] = useState(EMPTY);
-  const [tab, setTab] = useState<'details' | 'folders'>('details');
+  const [tab, setTab] = useState<PlaylistTab>('details');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -58,6 +62,7 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
   const close = () => {
     setForm(EMPTY);
     setSelectedFolders([]);
+    setPicks([]);
     setTab('details');
     setError('');
     onClose();
@@ -83,6 +88,7 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
           collectionId: form.collectionId || null,
           isPublic: form.isPublic,
           folderIds: selectedFolders,
+          tracks: picks,
         })
       );
       close();
@@ -96,13 +102,16 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
 
   return (
     <Modal isOpen={isOpen} onClose={close} title="Create playlist" kicker="Studio" width={560}>
-      <Segmented<'details' | 'folders'>
+      <Segmented<PlaylistTab>
         label="Playlist sections"
         value={tab}
         onChange={setTab}
         options={[
           { value: 'details', label: 'Details' },
           { value: 'folders', label: `Folders (${selectedFolders.length})` },
+          ...(adminData.capabilities.trackPicking
+            ? [{ value: 'tracks' as const, label: `Songs (${picks.length})` }]
+            : []),
         ]}
       />
 
@@ -194,6 +203,26 @@ export const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
               onCancel={close}
               onConfirm={() => setTab('folders')}
               confirmLabel="Next: pick folders"
+            />
+          </div>
+        ) : tab === 'tracks' ? (
+          <div>
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--nc-mut)' }}>
+              Pick individual songs straight from Dropbox — no folder sync involved.
+            </p>
+
+            <TrackPicker selected={picks} onChange={setPicks} />
+
+            <div style={{ marginTop: 14 }}>
+              <FormError message={error} />
+            </div>
+
+            <DialogActions
+              onCancel={() => setTab('details')}
+              secondaryLabel="Back"
+              onConfirm={submit}
+              confirmLabel="Create playlist"
+              busy={loading}
             />
           </div>
         ) : (
