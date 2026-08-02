@@ -32,7 +32,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
   onPlaylistUpdated,
   isReadOnly = false,
 }) => {
-  const { tracks, loading, reload, setTracks } = usePlaylistTracks(playlist, {
+  const { tracks, loading, error, reload, setTracks, canSync } = usePlaylistTracks(playlist, {
     admin: !isReadOnly,
   });
   const { state, playFromPlaylist, togglePlayPause, progress, seekToFraction } =
@@ -159,7 +159,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
           Back
         </button>
 
-        {canEdit && (
+        {canSync && (
           <button className="nc-btn" onClick={refresh} disabled={refreshing || loading}>
             <Icon
               name="refresh"
@@ -170,6 +170,13 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
           </button>
         )}
       </div>
+
+      {error && (
+        <p className="nc-tag nc-tag-danger" style={{ marginBottom: 18 }} role="status">
+          <Icon name="warning" size={13} />
+          {error}
+        </p>
+      )}
 
       <div style={{ display: 'flex', gap: 26, alignItems: 'flex-end', marginBottom: 28 }}>
         <div
@@ -452,9 +459,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
                     <span className="nc-truncate" dir="auto" style={{ fontSize: 14 }}>
                       {track.name}
                     </span>
-                    {/* Owners get the exact date behind an ⓘ; a listener only
-                        ever sees the dot, and only while it's fresh. */}
-                    <FreshnessMark track={track} withInfo={canEdit} />
+                    <FreshnessMark track={track} />
                     {canEdit && (
                       <button
                         className="nc-btn nc-btn-ghost nc-btn-icon"

@@ -1,4 +1,4 @@
-import { Collection, Playlist, Track } from '../types';
+import { Collection, Playlist, PlaylistSyncResult, Track } from '../types';
 
 // This service handles public data access without authentication
 class PublicDataService {
@@ -143,6 +143,26 @@ class PublicDataService {
       console.error('Error fetching playlist:', error);
       throw error;
     }
+  }
+
+  /**
+   * Ask the backend to re-pull this playlist's Dropbox folders.
+   *
+   * Drops the cached track list first, so the reload that follows can't be
+   * answered out of a cache that predates the sync. The backend applies its own
+   * cooldown, so pressing this repeatedly is cheap rather than abusive.
+   */
+  async syncPlaylist(playlistId: string): Promise<PlaylistSyncResult> {
+    const response = await fetch(`${this.baseUrl}/public/playlists/${playlistId}/sync`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to sync playlist');
+    }
+
+    this.cache.delete(this.getCacheKey('getPlaylistTracks', { playlistId }));
+    this.cache.delete(this.getCacheKey('getPlaylist', { playlistId }));
+    return response.json();
   }
 
   async getPlaylistTracks(playlistId: string): Promise<Track[]> {

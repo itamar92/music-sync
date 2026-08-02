@@ -6,6 +6,7 @@
 // The stream endpoints only ever serve paths belonging to such a playlist.
 import express from 'express';
 import { query } from '../db.js';
+import { syncPlaylistFolders } from '../folderSync.js';
 import { toCollection, toPlaylist, toTrack } from '../mappers.js';
 import { getStreamUrl, getStreamUrls } from '../streamLinks.js';
 
@@ -96,6 +97,35 @@ router.get('/playlists/:id/tracks', asyncRoute(async (req, res) => {
     [req.params.id],
   );
   res.json(rows.map(toTrack));
+}));
+
+/**
+ * Re-pull a public playlist's Dropbox folders on demand.
+ *
+ * Unauthenticated by product decision — a listener who has just been handed a
+ * new mix shouldn't have to wait for the owner to press sync. Three fences keep
+ * that from being a way to abuse Dropbox on the owner's behalf:
+ *
+ *  1. the playlist must be publicly visible, same rule as every route here;
+ *  2. only folders actually linked to that playlist are touched, resolved
+ *     server-side so the caller can't name its own;
+ *  3. a per-folder cooldown (see SYNC_COOLDOWN_MS) collapses repeat presses
+ *     into a 200 that did no Dropbox work at all.
+ *
+ * Answers 200 in every non-error case; `synced` says whether anything was
+ * actually re-read, so the UI can tell "up to date" from "just refreshed".
+ */
+router.post('/playlists/:id/sync', asyncRoute(async (req, res) => {
+  const visible = await query(
+    `SELECT 1 FROM playlists p
+     LEFT JOIN collections c ON c.id = p.collection_id
+     WHERE p.id = $1 AND ${VISIBLE_PLAYLIST}`,
+    [req.params.id],
+  );
+  if (visible.rowCount === 0) return res.status(404).json({ error: 'Playlist not found' });
+
+  const result = await syncPlaylistFolders(req.params.id);
+  res.json({ success: true, ...result });
 }));
 
 /**
