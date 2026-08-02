@@ -8,7 +8,7 @@
 //   - proactive keepalive refresh ~10 min before expiry
 //   - exponential backoff + jitter on 429/5xx, honoring Retry-After
 //   - one-shot replay of any request that hits a 401
-import { query, withTransaction } from './db.js';
+import { withTransaction } from './db.js';
 
 const TOKEN_KEY = 'dropbox_access_token';
 const RPC_BASE = 'https://api.dropboxapi.com/2';

@@ -777,7 +777,7 @@ class DropboxService {
           }
         };
         
-        const onError = (error: any) => {
+        const onError = () => {
           if (!resolved) {
             resolved = true;
             cleanup();

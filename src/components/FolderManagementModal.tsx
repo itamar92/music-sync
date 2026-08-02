@@ -6,8 +6,7 @@ import {
   Search, 
   ChevronRight,
   Home,
-  Check,
-  X
+  Check
 } from 'lucide-react';
 import { Folder } from '../types';
 import { Modal } from './Modal';
@@ -22,7 +21,6 @@ interface FolderManagementModalProps {
   onNavigateBack: () => void;
   currentPath: string;
   isLoading?: boolean;
-  onOpen?: () => void;
   onLoadFolderDetails?: (folder: Folder) => Promise<{trackCount: number, hasSubfolders: boolean}>;
 }
 
@@ -36,7 +34,6 @@ export const FolderManagementModal: React.FC<FolderManagementModalProps> = ({
   onNavigateBack,
   currentPath,
   isLoading = false,
-  onOpen,
   onLoadFolderDetails
 }) => {
   const [searchQuery, setSearchQuery] = useState('');

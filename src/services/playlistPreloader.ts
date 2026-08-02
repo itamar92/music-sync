@@ -257,7 +257,9 @@ export class PlaylistPreloaderService {
     }
   }
 
-  private queuePreload(trackId: string, trackPath: string, priority: 'medium' | 'low') {
+  // The queue holds ids only; the path and priority are resolved when the task
+  // is actually dequeued, so they are accepted here but not stored.
+  private queuePreload(trackId: string, _trackPath: string, _priority: 'medium' | 'low') {
     if (!this.preloadTasks.has(trackId) && !this.preloadQueue.includes(trackId)) {
       this.preloadQueue.push(trackId);
     }

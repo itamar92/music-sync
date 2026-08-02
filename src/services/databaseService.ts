@@ -1,6 +1,6 @@
 // src/services/databaseService.ts
 import { db } from './firebase';
-import { collection, addDoc, getDocs, doc, getDoc, updateDoc, deleteDoc, query, where, writeBatch, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, getDoc, updateDoc, query, where, writeBatch, Timestamp } from 'firebase/firestore';
 import { Track, Playlist, Folder } from '../types';
 
 // Database entity interfaces
@@ -131,7 +131,10 @@ class DatabaseServiceImpl implements DatabaseService {
     return { id: updatedDoc.id, ...updatedDoc.data() } as UserEntity;
   }
 
-    // All methods would be implemented to make API calls to the backend
+  // Unimplemented section. These satisfy the DatabaseService interface and
+  // throw; the parameter names are kept because they document the signature a
+  // real implementation has to honour, so unused-args is off until then.
+  /* eslint-disable @typescript-eslint/no-unused-vars */
   async syncFolder(userId: string, folder: Folder): Promise<FolderSyncEntity> {
     throw new Error('Database service not implemented yet');
   }
@@ -199,6 +202,7 @@ class DatabaseServiceImpl implements DatabaseService {
   async updateLastSyncTime(userId: string, folderId: string): Promise<void> {
     throw new Error('Database service not implemented yet');
   }
+  /* eslint-enable @typescript-eslint/no-unused-vars */
 
   // Track caching implementations
   async getCachedTracks(userId: string, folderId: string): Promise<TrackEntity[]> {

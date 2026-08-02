@@ -1,8 +1,7 @@
 // Comprehensive test suite for token encryption security
-import { TokenEncryption, EncryptionMetrics } from '../services/tokenEncryption';
+import { TokenEncryption } from '../services/tokenEncryption';
 import { TokenManager } from '../services/tokenManager';
 import { KeyRotationService } from '../services/keyRotation';
-import { AuthSecurity } from '../utils/authSecurity';
 
 export interface TestResult {
   testName: string;
