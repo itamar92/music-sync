@@ -49,6 +49,7 @@ export const PickRow: React.FC<PickRowProps> = ({ selected, onToggle, title, sub
     <span style={{ minWidth: 0 }}>
       <span
         className="nc-truncate"
+        dir="auto"
         style={{ display: 'block', fontSize: 13.5, fontWeight: 500 }}
       >
         {title}
@@ -56,6 +57,7 @@ export const PickRow: React.FC<PickRowProps> = ({ selected, onToggle, title, sub
       {subtitle && (
         <span
           className="nc-truncate"
+          dir="auto"
           style={{ display: 'block', fontSize: 11.5, color: 'var(--nc-mut)' }}
         >
           {subtitle}
