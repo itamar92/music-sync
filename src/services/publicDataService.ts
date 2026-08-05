@@ -232,9 +232,15 @@ class PublicDataService {
     }
   }
 
-  async getTrackStreamUrl(filePath: string): Promise<string> {
-    const cached = this.getCachedStreamUrl(filePath);
-    if (cached) return cached;
+  async getTrackStreamUrl(filePath: string, fresh = false): Promise<string> {
+    if (!fresh) {
+      const cached = this.getCachedStreamUrl(filePath);
+      if (cached) return cached;
+    } else {
+      // A fresh request exists because the cached link is dead — drop it so a
+      // concurrent caller can't pick it up while the replacement is in flight.
+      this.streamUrlCache.delete(filePath);
+    }
 
     try {
       const response = await fetch(`${this.baseUrl}/public/stream`, {
@@ -242,7 +248,7 @@ class PublicDataService {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ filePath }),
+        body: JSON.stringify({ filePath, ...(fresh ? { fresh: true } : {}) }),
       });
       
       if (!response.ok) {

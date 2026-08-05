@@ -96,15 +96,21 @@ export async function materialiseFolderTracks(folderId, playlistId, files = null
     // Freshness belongs to the Dropbox file, not to how the row got here, so it
     // is written outside the fence above — a hand-picked track sharing one of
     // these files gets an accurate timestamp without its name or order moving.
-    await client.query(
+    const changed = await client.query(
       `UPDATE tracks AS t
        SET dropbox_modified = f.modified
        FROM (SELECT unnest($2::text[]) AS path, unnest($3::timestamptz[]) AS modified) AS f
        WHERE t.playlist_id = $1
          AND t.file_path = f.path
-         AND t.dropbox_modified IS DISTINCT FROM f.modified`,
+         AND t.dropbox_modified IS DISTINCT FROM f.modified
+       RETURNING t.file_path`,
       [playlistId, paths, entries.map((f) => f.modified ?? null)],
     );
+
+    // A changed modification time means Dropbox has a new revision of the file,
+    // which invalidates any cached temporary link (links are rev-bound). Forget
+    // them so the next stream request mints a live one instead of a 404.
+    for (const row of changed.rows) forget(row.file_path);
 
     const removed = await client.query(
       `DELETE FROM tracks

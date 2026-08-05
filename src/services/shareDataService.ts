@@ -114,14 +114,19 @@ class ShareDataService {
     this.streamUrlCache.set(filePath, { url, expiresAt: Date.now() + STREAM_URL_TTL_MS });
   }
 
-  async getTrackStreamUrl(filePath: string): Promise<string> {
-    const cached = this.getCachedStreamUrl(filePath);
-    if (cached) return cached;
+  async getTrackStreamUrl(filePath: string, fresh = false): Promise<string> {
+    if (!fresh) {
+      const cached = this.getCachedStreamUrl(filePath);
+      if (cached) return cached;
+    } else {
+      // The cached link is dead — drop it before fetching its replacement.
+      this.streamUrlCache.delete(filePath);
+    }
 
     const response = await fetch(`${this.root}/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filePath }),
+      body: JSON.stringify({ filePath, ...(fresh ? { fresh: true } : {}) }),
     });
     if (!response.ok) throw new Error('Failed to get stream URL');
 

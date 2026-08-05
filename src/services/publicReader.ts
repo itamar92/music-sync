@@ -12,7 +12,8 @@ import { shareDataService } from './shareDataService';
  */
 export interface PublicReader {
   getPlaylistTracks(playlistId: string): Promise<Track[]>;
-  getTrackStreamUrl(filePath: string): Promise<string>;
+  /** `fresh` skips every cache tier — used to recover from a dead cached link. */
+  getTrackStreamUrl(filePath: string, fresh?: boolean): Promise<string>;
   prefetchStreamUrls(filePaths: string[]): Promise<void>;
   reportTrackDuration(trackId: string, durationSeconds: number): Promise<void>;
 }

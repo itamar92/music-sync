@@ -453,6 +453,20 @@ body {
   padding: 1px 4px;
 }
 
+/* iOS Safari zooms the whole page when a focused input's font-size is under
+   16px — and the zoom sticks after navigating away (the studio login was
+   leaving the entire dashboard "zoomed in"). Every text control is 16px at
+   phone widths so focus never triggers it. Placed after the base rules above:
+   equal specificity means source order decides. */
+@media (max-width: 900px) {
+  .nc-input,
+  .nc-select,
+  .nc-textarea,
+  .nc-search input {
+    font-size: 16px;
+  }
+}
+
 /* Segmented control — two or three exclusive views inside one panel. */
 .nc-seg {
   display: flex;

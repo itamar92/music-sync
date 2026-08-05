@@ -40,17 +40,25 @@ async function persist(filePath, url, expiresAt) {
   );
 }
 
-/** Resolve one stream URL, using the cache when it is still live. */
-export async function getStreamUrl(filePath) {
-  const hit = memory.get(filePath);
-  if (live(hit)) return hit.url;
-  memory.delete(filePath);
+/**
+ * Resolve one stream URL, using the cache when it is still live.
+ *
+ * `fresh` skips both cache tiers and mints a new temporary link — the player
+ * asks for that after a link 404s (Dropbox links are bound to a file revision,
+ * so replacing the file kills a cached link before it expires).
+ */
+export async function getStreamUrl(filePath, { fresh = false } = {}) {
+  if (!fresh) {
+    const hit = memory.get(filePath);
+    if (live(hit)) return hit.url;
+    memory.delete(filePath);
 
-  const stored = await fromDatabase(filePath).catch((err) => {
-    console.warn('[streamLinks] cache read failed:', err.message);
-    return null;
-  });
-  if (stored) return stored;
+    const stored = await fromDatabase(filePath).catch((err) => {
+      console.warn('[streamLinks] cache read failed:', err.message);
+      return null;
+    });
+    if (stored) return stored;
+  }
 
   const url = await getTemporaryLink(filePath);
   const expiresAt = Date.now() + TTL_MS;
@@ -97,7 +105,14 @@ export async function pruneExpired() {
   });
 }
 
-/** Forget a path (e.g. after a re-sync replaces it). */
+/**
+ * Forget a path (e.g. after a re-sync replaces or removes it). Clears both
+ * cache tiers — leaving the Postgres row would resurrect the stale link on
+ * the next request. Best-effort and safe to fire-and-forget.
+ */
 export function forget(filePath) {
   memory.delete(filePath);
+  return query('DELETE FROM stream_links WHERE file_path = $1', [filePath]).catch((err) => {
+    console.warn('[streamLinks] forget failed:', err.message);
+  });
 }

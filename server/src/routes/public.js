@@ -187,7 +187,9 @@ router.post('/stream', asyncRoute(async (req, res) => {
     return res.status(404).json({ error: 'Track not available' });
   }
 
-  const streamUrl = await getStreamUrl(filePath);
+  // `fresh` bypasses the link cache — the player sends it after a cached link
+  // 404s, which happens when the Dropbox file was replaced since caching.
+  const streamUrl = await getStreamUrl(filePath, { fresh: req.body?.fresh === true });
   res.json({ streamUrl });
 }));
 

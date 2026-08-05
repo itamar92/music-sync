@@ -36,6 +36,10 @@ export const useAudioPlayer = () => {
     currentTrackRef.current = state.currentTrack;
   }, [state.currentTrack]);
 
+  // Path of the track a dead-link recovery was already attempted for, so a
+  // track that is genuinely broken fails once instead of retrying forever.
+  const retriedPathRef = useRef<string | null>(null);
+
   // 🎵 Dynamic document title for mobile users
   useDocumentTitle({
     currentTrack: state.currentTrack,
@@ -60,7 +64,11 @@ export const useAudioPlayer = () => {
 
   const loadTrack = useCallback(async (track: Track, index: number) => {
     console.log('Loading track:', track.name, 'Duration:', track.duration, 'DurationSeconds:', track.durationSeconds);
-    
+
+    // A deliberate (re)load gets a clean slate: the dead-link guard only has to
+    // stop the error handler from retrying in a loop within one load cycle.
+    retriedPathRef.current = null;
+
     // Reset state BEFORE loading new source to prevent race conditions
     updateState({
       currentTrack: track,
@@ -369,7 +377,31 @@ export const useAudioPlayer = () => {
     const handleLoadStart = () => console.log('🔄 Audio loadstart event');
     const handleLoadedData = () => console.log('📊 Audio loadeddata event - duration:', audio?.duration);
     const handleCanPlay = () => console.log('▶️ Audio canplay event - duration:', audio?.duration);
-    const handleError = (e: Event) => console.error('❌ Audio error event:', e);
+    const handleError = (e: Event) => {
+      console.error('❌ Audio error event:', e);
+
+      // Dropbox temporary links are bound to a file revision — replacing the
+      // file in Dropbox 404s every cached link before it expires. Recover by
+      // re-requesting the URL with every cache tier bypassed, once per track.
+      const track = currentTrackRef.current;
+      if (!isServerMode || !track?.path || retriedPathRef.current === track.path) return;
+      retriedPathRef.current = track.path;
+
+      publicReader()
+        .getTrackStreamUrl(track.path, true)
+        .then((freshUrl) => {
+          if (currentTrackRef.current?.path !== track.path || !audio) return;
+          console.log('🔄 Cached stream link was dead — retrying with a fresh one');
+          audio.src = freshUrl;
+          audio.load();
+          // canplaythrough resumes playback if the user had pressed play.
+        })
+        .catch((refreshError) => {
+          console.error('Fresh stream link also failed:', refreshError);
+          trackError(refreshError as Error, 'high', { track_id: track.id, fresh_retry: true });
+          updateState({ isPlaying: false });
+        });
+    };
 
     // Detect browser capabilities for time update strategy
     const userAgent = navigator.userAgent.toLowerCase();
