@@ -172,18 +172,26 @@ export const Waveform: React.FC<WaveformProps> = ({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!onSeek) return;
+    // Every window listener below checks this id so a second concurrent
+    // pointer (another finger, another row) can't feed this gesture.
+    const pointerId = e.pointerId;
 
     // Mouse: seek immediately, then drag-to-scrub until release.
     if (e.pointerType === 'mouse') {
       e.preventDefault();
       onSeek(positionFrom(e.clientX));
-      const move = (ev: PointerEvent) => onSeek(positionFrom(ev.clientX));
-      const up = () => {
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
+      const mouseMove = (ev: PointerEvent) => {
+        if (ev.pointerId === pointerId && onSeek) onSeek(positionFrom(ev.clientX));
       };
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
+      const mouseEnd = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener('pointermove', mouseMove);
+        window.removeEventListener('pointerup', mouseEnd);
+        window.removeEventListener('pointercancel', mouseEnd);
+      };
+      window.addEventListener('pointermove', mouseMove);
+      window.addEventListener('pointerup', mouseEnd);
+      window.addEventListener('pointercancel', mouseEnd);
       return;
     }
 
@@ -199,10 +207,13 @@ export const Waveform: React.FC<WaveformProps> = ({
     function cleanup() {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', cleanup);
+      window.removeEventListener('pointercancel', cancel);
+    }
+    function cancel(ev: PointerEvent) {
+      if (ev.pointerId === pointerId) cleanup();
     }
     function move(ev: PointerEvent) {
-      if (!onSeek) return;
+      if (ev.pointerId !== pointerId || !onSeek) return;
       if (!scrubbing) {
         const dx = Math.abs(ev.clientX - startX);
         const dy = Math.abs(ev.clientY - startY);
@@ -212,13 +223,14 @@ export const Waveform: React.FC<WaveformProps> = ({
       onSeek(positionFrom(ev.clientX));
     }
     function up(ev: PointerEvent) {
+      if (ev.pointerId !== pointerId) return;
       const moved = Math.hypot(ev.clientX - startX, ev.clientY - startY);
       if (!scrubbing && moved <= SLOP && onSeek) onSeek(positionFrom(ev.clientX));
       cleanup();
     }
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', cleanup);
+    window.addEventListener('pointercancel', cancel);
   };
 
   return (
