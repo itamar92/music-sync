@@ -380,6 +380,12 @@ export const useAudioPlayer = () => {
     const handleError = (e: Event) => {
       console.error('❌ Audio error event:', e);
 
+      // loadTrack clears the element (`src = ''` + load()) before the real URL
+      // is fetched; some browsers report that reset as an error. It must not
+      // consume the one dead-link retry the real source is entitled to.
+      const src = audio.currentSrc || audio.src;
+      if (!src || src === window.location.href) return;
+
       // Dropbox temporary links are bound to a file revision — replacing the
       // file in Dropbox 404s every cached link before it expires. Recover by
       // re-requesting the URL with every cache tier bypassed, once per track.
@@ -399,7 +405,11 @@ export const useAudioPlayer = () => {
         .catch((refreshError) => {
           console.error('Fresh stream link also failed:', refreshError);
           trackError(refreshError as Error, 'high', { track_id: track.id, fresh_retry: true });
-          updateState({ isPlaying: false });
+          // The user may have moved on to another track while this fetch was
+          // in flight — only surface the failure if it's still the one loaded.
+          if (currentTrackRef.current?.path === track.path) {
+            updateState({ isPlaying: false });
+          }
         });
     };
 

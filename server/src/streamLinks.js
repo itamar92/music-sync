@@ -13,6 +13,16 @@ const BATCH_CONCURRENCY = 4;
 /** filePath -> { url, expiresAt (ms) } */
 const memory = new Map();
 
+/**
+ * How often one path may force a cache bypass. `fresh` exists so a player can
+ * recover from a dead link once; without a cap it would let any anonymous
+ * caller turn every request into a live Dropbox RPC against the app's single
+ * credential. Within the window a fresh request degrades to a cached read.
+ */
+const FRESH_COOLDOWN_MS = 30_000;
+/** filePath -> last forced-mint timestamp (ms). */
+const lastFresh = new Map();
+
 const live = (entry) => entry && entry.expiresAt > Date.now();
 
 function remember(filePath, url, expiresAt) {
@@ -48,6 +58,12 @@ async function persist(filePath, url, expiresAt) {
  * so replacing the file kills a cached link before it expires).
  */
 export async function getStreamUrl(filePath, { fresh = false } = {}) {
+  if (fresh) {
+    const last = lastFresh.get(filePath) || 0;
+    if (Date.now() - last < FRESH_COOLDOWN_MS) fresh = false;
+    else lastFresh.set(filePath, Date.now());
+  }
+
   if (!fresh) {
     const hit = memory.get(filePath);
     if (live(hit)) return hit.url;
@@ -99,6 +115,9 @@ export async function getStreamUrls(filePaths) {
 export async function pruneExpired() {
   for (const [path, entry] of memory) {
     if (!live(entry)) memory.delete(path);
+  }
+  for (const [path, at] of lastFresh) {
+    if (Date.now() - at >= FRESH_COOLDOWN_MS) lastFresh.delete(path);
   }
   await query('DELETE FROM stream_links WHERE expires_at <= now()').catch((err) => {
     console.warn('[streamLinks] prune failed:', err.message);
