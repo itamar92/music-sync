@@ -451,7 +451,8 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input
                       className="nc-input"
-                      style={{ height: 30, fontSize: 13 }}
+                      // 16px on mobile: anything smaller makes iOS zoom the page on focus.
+                      style={{ height: isMobile ? 34 : 30, fontSize: isMobile ? 16 : 13 }}
                       value={editingTrackName}
                       onChange={(e) => setEditingTrackName(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && saveTrackName(track.id)}

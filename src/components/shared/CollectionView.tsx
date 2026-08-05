@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useIsMobile } from '../../hooks/useMediaQuery';
 import { adminData } from '../../services/adminData';
 import { publicDataService } from '../../services/publicDataService';
 import { EditCollectionModal } from '../admin/EditCollectionModal';
@@ -30,6 +31,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
   onPlaylistSelect,
   isReadOnly = false,
 }) => {
+  const isMobile = useIsMobile();
   const [playlists, setPlaylists] = useState<PlaylistRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -69,9 +71,12 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
           justifyContent: 'space-between',
           gap: 20,
           marginBottom: 24,
+          // Long collection names push the action button to its own line
+          // instead of squeezing the heading.
+          flexWrap: 'wrap',
         }}
       >
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div className="nc-kicker" style={{ marginBottom: 10 }}>
             Collection
           </div>
@@ -140,10 +145,18 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
                 <div className="nc-truncate" dir="auto" style={{ fontSize: 12, color: 'var(--nc-mut)' }}>
                   {playlist.description || 'No description'}
                 </div>
+                {/* On a phone the count moves under the name so the name gets the row. */}
+                {isMobile && (
+                  <div className="nc-mono" style={{ fontSize: 10.5, color: 'var(--nc-dim)', marginTop: 2 }}>
+                    {playlist.trackCount || playlist.totalTracks || 0} TRACKS
+                  </div>
+                )}
               </div>
-              <span className="nc-mono" style={{ fontSize: 11, color: 'var(--nc-dim)', flexShrink: 0 }}>
-                {playlist.trackCount || playlist.totalTracks || 0} TRACKS
-              </span>
+              {!isMobile && (
+                <span className="nc-mono" style={{ fontSize: 11, color: 'var(--nc-dim)', flexShrink: 0 }}>
+                  {playlist.trackCount || playlist.totalTracks || 0} TRACKS
+                </span>
+              )}
               <Icon name="caretRight" size={15} color="var(--nc-faint)" />
             </button>
           ))}
