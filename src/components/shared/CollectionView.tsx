@@ -75,7 +75,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
           <div className="nc-kicker" style={{ marginBottom: 10 }}>
             Collection
           </div>
-          <h1 className="nc-h1" style={{ fontSize: 30 }}>
+          <h1 className="nc-h1" dir="auto" style={{ fontSize: 30, overflowWrap: 'anywhere' }}>
             {selectedCollection.displayName || selectedCollection.name}
           </h1>
         </div>
@@ -134,14 +134,14 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
                 <CollectionGlyph size={44} />
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="nc-truncate" style={{ fontSize: 14, fontWeight: 500 }}>
+                <div className="nc-clamp2" dir="auto" style={{ fontSize: 14, fontWeight: 500, lineHeight: 1.3 }}>
                   {playlist.displayName || playlist.name}
                 </div>
-                <div className="nc-truncate" style={{ fontSize: 12, color: 'var(--nc-mut)' }}>
+                <div className="nc-truncate" dir="auto" style={{ fontSize: 12, color: 'var(--nc-mut)' }}>
                   {playlist.description || 'No description'}
                 </div>
               </div>
-              <span className="nc-mono" style={{ fontSize: 11, color: 'var(--nc-dim)' }}>
+              <span className="nc-mono" style={{ fontSize: 11, color: 'var(--nc-dim)', flexShrink: 0 }}>
                 {playlist.trackCount || playlist.totalTracks || 0} TRACKS
               </span>
               <Icon name="caretRight" size={15} color="var(--nc-faint)" />

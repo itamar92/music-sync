@@ -172,17 +172,65 @@ export const Waveform: React.FC<WaveformProps> = ({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!onSeek) return;
-    e.preventDefault();
-    onSeek(positionFrom(e.clientX));
+    // Every window listener below checks this id so a second concurrent
+    // pointer (another finger, another row) can't feed this gesture.
+    const pointerId = e.pointerId;
 
-    // Drag-to-scrub: track the pointer until release, wherever it goes.
-    const move = (ev: PointerEvent) => onSeek(positionFrom(ev.clientX));
-    const up = () => {
+    // Mouse: seek immediately, then drag-to-scrub until release.
+    if (e.pointerType === 'mouse') {
+      e.preventDefault();
+      onSeek(positionFrom(e.clientX));
+      const mouseMove = (ev: PointerEvent) => {
+        if (ev.pointerId === pointerId && onSeek) onSeek(positionFrom(ev.clientX));
+      };
+      const mouseEnd = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener('pointermove', mouseMove);
+        window.removeEventListener('pointerup', mouseEnd);
+        window.removeEventListener('pointercancel', mouseEnd);
+      };
+      window.addEventListener('pointermove', mouseMove);
+      window.addEventListener('pointerup', mouseEnd);
+      window.addEventListener('pointercancel', mouseEnd);
+      return;
+    }
+
+    // Touch: a finger landing here is usually the start of a page scroll, so
+    // nothing happens on contact. `touch-action: pan-y` leaves vertical pans
+    // to the browser (which fires pointercancel — we stand down); a mostly
+    // horizontal drag becomes a scrub, and a clean tap seeks on release.
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const SLOP = 8;
+    let scrubbing = false;
+
+    function cleanup() {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-    };
+      window.removeEventListener('pointercancel', cancel);
+    }
+    function cancel(ev: PointerEvent) {
+      if (ev.pointerId === pointerId) cleanup();
+    }
+    function move(ev: PointerEvent) {
+      if (ev.pointerId !== pointerId || !onSeek) return;
+      if (!scrubbing) {
+        const dx = Math.abs(ev.clientX - startX);
+        const dy = Math.abs(ev.clientY - startY);
+        if (dx > SLOP && dx > dy) scrubbing = true;
+        else return;
+      }
+      onSeek(positionFrom(ev.clientX));
+    }
+    function up(ev: PointerEvent) {
+      if (ev.pointerId !== pointerId) return;
+      const moved = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+      if (!scrubbing && moved <= SLOP && onSeek) onSeek(positionFrom(ev.clientX));
+      cleanup();
+    }
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
   };
 
   return (
@@ -209,7 +257,9 @@ export const Waveform: React.FC<WaveformProps> = ({
         width: '100%',
         height,
         cursor: onSeek ? 'crosshair' : undefined,
-        touchAction: onSeek ? 'none' : undefined,
+        // Vertical pans stay with the browser so a scroll that starts on the
+        // waveform scrolls the page instead of playing the track.
+        touchAction: onSeek ? 'pan-y' : undefined,
         ...style,
       }}
     />

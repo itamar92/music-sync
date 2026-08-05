@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useIsMobile } from '../../hooks/useMediaQuery';
 import { usePlaylistTracks } from '../../hooks/usePlaylistTracks';
 import { useAudioPlayerContext } from '../../context/AudioPlayerContext';
 import { adminData } from '../../services/adminData';
@@ -37,6 +38,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
   });
   const { state, playFromPlaylist, togglePlayPause, progress, seekToFraction } =
     useAudioPlayerContext();
+  const isMobile = useIsMobile();
 
   const [title, setTitle] = useState(playlist.displayName || playlist.name);
   const [artist, setArtist] = useState(playlist.artist || 'Unknown Artist');
@@ -178,10 +180,22 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
         </p>
       )}
 
-      <div style={{ display: 'flex', gap: 26, alignItems: 'flex-end', marginBottom: 28 }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: isMobile ? 16 : 26,
+          alignItems: 'flex-end',
+          marginBottom: isMobile ? 20 : 28,
+        }}
+      >
         <div
           className="nc-art"
-          style={{ width: 168, height: 168, borderRadius: 12, boxShadow: 'var(--nc-shadow-md)' }}
+          style={{
+            width: isMobile ? 112 : 168,
+            height: isMobile ? 112 : 168,
+            borderRadius: 12,
+            boxShadow: 'var(--nc-shadow-md)',
+          }}
         >
           {playlist.coverImageUrl ? (
             <img
@@ -191,7 +205,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
             />
           ) : (
             <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
-              <Waveform seed={playlist.id + playlist.name} kind="cover" height={78} />
+              <Waveform seed={playlist.id + playlist.name} kind="cover" height={isMobile ? 52 : 78} />
             </div>
           )}
         </div>
@@ -228,7 +242,11 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
-              <h1 className="nc-h1" dir="auto" style={{ fontSize: 38 }}>
+              <h1
+                className="nc-h1"
+                dir="auto"
+                style={{ fontSize: isMobile ? 24 : 38, overflowWrap: 'anywhere' }}
+              >
                 {title}
               </h1>
               {canEdit && (
@@ -302,27 +320,29 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
         </div>
       </div>
 
-      <div
-        className="nc-mono"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: canEdit ? '44px 24px 1fr 1.1fr 74px 34px' : '44px 1fr 1.1fr 74px',
-          alignItems: 'center',
-          gap: 16,
-          padding: '0 14px 9px',
-          fontSize: 10.5,
-          letterSpacing: '0.12em',
-          color: 'var(--nc-dim)',
-          borderBottom: '1px solid var(--nc-line)',
-        }}
-      >
-        <span>#</span>
-        {canEdit && <span />}
-        <span>TITLE</span>
-        <span>WAVEFORM</span>
-        <span style={{ textAlign: 'right' }}>TIME</span>
-        {canEdit && <span />}
-      </div>
+      {!isMobile && (
+        <div
+          className="nc-mono"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: canEdit ? '44px 24px 1fr 1.1fr 74px 34px' : '44px 1fr 1.1fr 74px',
+            alignItems: 'center',
+            gap: 16,
+            padding: '0 14px 9px',
+            fontSize: 10.5,
+            letterSpacing: '0.12em',
+            color: 'var(--nc-dim)',
+            borderBottom: '1px solid var(--nc-line)',
+          }}
+        >
+          <span>#</span>
+          {canEdit && <span />}
+          <span>TITLE</span>
+          <span>WAVEFORM</span>
+          <span style={{ textAlign: 'right' }}>TIME</span>
+          {canEdit && <span />}
+        </div>
+      )}
 
       {loading ? (
         <div style={{ padding: 48, display: 'flex', justifyContent: 'center' }}>
@@ -340,7 +360,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
           return (
             <div
               key={track.id}
-              draggable={canEdit}
+              draggable={canEdit && !isMobile}
               onDragStart={() => canEdit && setDragIndex(index)}
               onDragOver={(e) => canEdit && e.preventDefault()}
               onDrop={() => drop(index)}
@@ -348,12 +368,16 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
               style={{
                 position: 'relative',
                 display: 'grid',
-                gridTemplateColumns: canEdit
-                  ? '44px 24px 1fr 1.1fr 74px 34px'
-                  : '44px 1fr 1.1fr 74px',
+                // On a phone the row folds to number · title-with-waveform ·
+                // time; the grip and the wide waveform column don't fit.
+                gridTemplateColumns: isMobile
+                  ? '36px 1fr 52px'
+                  : canEdit
+                    ? '44px 24px 1fr 1.1fr 74px 34px'
+                    : '44px 1fr 1.1fr 74px',
                 alignItems: 'center',
-                gap: 16,
-                padding: '11px 14px',
+                gap: isMobile ? 10 : 16,
+                padding: isMobile ? '10px 8px' : '11px 14px',
                 borderRadius: 9,
                 overflow: 'hidden',
                 opacity: dragIndex === index ? 0.5 : 1,
@@ -413,7 +437,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
                 <EqBars opacity={playing ? 1 : 0} />
               </button>
 
-              {canEdit && (
+              {canEdit && !isMobile && (
                 <span
                   style={{ position: 'relative', color: 'var(--nc-faint)', cursor: 'grab' }}
                   title="Drag to reorder"
@@ -456,7 +480,11 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                    <span className="nc-truncate" dir="auto" style={{ fontSize: 14 }}>
+                    <span
+                      className={isMobile ? 'nc-clamp2' : 'nc-truncate'}
+                      dir="auto"
+                      style={{ fontSize: 14, lineHeight: isMobile ? 1.3 : undefined }}
+                    >
                       {track.name}
                     </span>
                     <FreshnessMark track={track} />
@@ -473,20 +501,44 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
                         <Icon name="pencil" size={12} />
                       </button>
                     )}
+                    {canEdit && isMobile && (
+                      <button
+                        className="nc-btn nc-btn-ghost nc-btn-icon"
+                        style={{ width: 22, height: 22, color: 'var(--nc-faint)' }}
+                        onClick={() => removeTrack(track.id)}
+                        aria-label={`Remove ${track.name} from playlist`}
+                      >
+                        <Icon name="trash" size={12} />
+                      </button>
+                    )}
                   </div>
+                )}
+                {isMobile && (
+                  <Waveform
+                    seed={track.name}
+                    kind="row"
+                    progress={current ? progress : 0}
+                    live={current}
+                    height={24}
+                    onSeek={(fraction) => (current ? seekToFraction(fraction) : play(index))}
+                    ariaLabel={`Scrub ${track.name}`}
+                    style={{ marginTop: 4 }}
+                  />
                 )}
               </div>
 
-              <Waveform
-                seed={track.name}
-                kind="row"
-                progress={current ? progress : 0}
-                live={current}
-                height={30}
-                onSeek={(fraction) => (current ? seekToFraction(fraction) : play(index))}
-                ariaLabel={`Scrub ${track.name}`}
-                style={{ position: 'relative' }}
-              />
+              {!isMobile && (
+                <Waveform
+                  seed={track.name}
+                  kind="row"
+                  progress={current ? progress : 0}
+                  live={current}
+                  height={30}
+                  onSeek={(fraction) => (current ? seekToFraction(fraction) : play(index))}
+                  ariaLabel={`Scrub ${track.name}`}
+                  style={{ position: 'relative' }}
+                />
+              )}
 
               <span
                 className="nc-mono"
@@ -500,7 +552,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
                 {track.duration || formatTime((track as Track).durationSeconds || 0)}
               </span>
 
-              {canEdit && (
+              {canEdit && !isMobile && (
                 <button
                   className="nc-btn nc-btn-ghost nc-btn-icon"
                   style={{ position: 'relative', width: 26, height: 26, color: 'var(--nc-faint)' }}
