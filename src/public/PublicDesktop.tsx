@@ -252,11 +252,12 @@ const CollectionsRail: React.FC<{ library: PublicLibrary }> = ({ library }) => (
             <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
               <div
                 className="nc-truncate"
+                dir="auto"
                 style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--nc-text)' }}
               >
                 {label(item)}
               </div>
-              <div className="nc-truncate" style={{ fontSize: 11.5, color: 'var(--nc-mut)' }}>
+              <div className="nc-truncate" dir="auto" style={{ fontSize: 11.5, color: 'var(--nc-mut)' }}>
                 {item.description || 'Streaming from Dropbox'}
               </div>
             </div>
@@ -428,7 +429,7 @@ const CollectionPane: React.FC<{ library: PublicLibrary; collection: Collection 
         <div className="nc-kicker" style={{ marginBottom: 12 }}>
           Collection
         </div>
-        <h1 className="nc-h1" style={{ marginBottom: 10 }}>
+        <h1 className="nc-h1" dir="auto" style={{ marginBottom: 10 }}>
           {label(collection)}
         </h1>
         {collection.description && (
@@ -523,11 +524,12 @@ const CollectionPane: React.FC<{ library: PublicLibrary; collection: Collection 
             <div style={{ minWidth: 0 }}>
               <div
                 className="nc-truncate"
+                dir="auto"
                 style={{ fontSize: 14.5, fontWeight: 500, color: 'var(--nc-text)' }}
               >
                 {label(playlist)}
               </div>
-              <div className="nc-truncate" style={{ fontSize: 12, color: 'var(--nc-mut)' }}>
+              <div className="nc-truncate" dir="auto" style={{ fontSize: 12, color: 'var(--nc-mut)' }}>
                 {playlist.description || playlist.folderPath || 'Synced folder'}
               </div>
             </div>
@@ -644,7 +646,7 @@ const PlaylistPane: React.FC<{
           <div className="nc-kicker" style={{ marginBottom: 10 }}>
             Playlist
           </div>
-          <h1 className="nc-h1" style={{ fontSize: 42, marginBottom: 8, lineHeight: 1.05 }}>
+          <h1 className="nc-h1" dir="auto" style={{ fontSize: 42, marginBottom: 8, lineHeight: 1.05 }}>
             {label(playlist)}
           </h1>
           <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--nc-mut)' }}>
@@ -842,7 +844,7 @@ const TrackRow: React.FC<TrackRowProps> = ({
       style={{ position: 'relative', minWidth: 0, cursor: 'pointer' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-        <span className="nc-truncate" style={{ fontSize: 14, color: 'var(--nc-text)' }}>
+        <span className="nc-truncate" dir="auto" style={{ fontSize: 14, color: 'var(--nc-text)' }}>
           {track.name}
         </span>
         <FreshnessMark track={track} />

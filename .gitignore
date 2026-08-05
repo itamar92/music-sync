@@ -37,4 +37,7 @@ Thumbs.db
 .dropbox.cache/
 
 # Misc
-coverage/ 
+coverage/
+
+# Claude Code local config
+.claude/

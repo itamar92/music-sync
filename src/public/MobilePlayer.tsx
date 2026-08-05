@@ -59,11 +59,12 @@ export const MiniPlayer: React.FC = () => {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px' }}>
         <div className="nc-art" style={{ width: 42, height: 42, borderRadius: 9 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="nc-truncate" style={{ fontSize: 13, fontWeight: 500 }}>
+          <div className="nc-truncate" dir="auto" style={{ fontSize: 13, fontWeight: 500 }}>
             {state.currentTrack?.name}
           </div>
           <div
             className="nc-truncate nc-mono"
+            dir="auto"
             style={{ fontSize: 10.5, color: 'var(--nc-mut)' }}
           >
             {subtitle}
@@ -174,6 +175,7 @@ export const NowPlayingSheet: React.FC = () => {
         </button>
         <span
           className="nc-kicker nc-truncate"
+          dir="auto"
           style={{ flex: 1, minWidth: 0, textAlign: 'center', padding: '0 10px', fontSize: 10 }}
         >
           {context.collectionName || context.playlistName || 'Now playing'}
@@ -256,6 +258,7 @@ export const NowPlayingSheet: React.FC = () => {
 
           <div>
             <h1
+              dir="auto"
               style={{
                 margin: '0 0 6px',
                 fontSize: 23,
@@ -263,11 +266,12 @@ export const NowPlayingSheet: React.FC = () => {
                 letterSpacing: '-0.02em',
                 lineHeight: 1.2,
                 textWrap: 'pretty',
+                overflowWrap: 'anywhere',
               }}
             >
               {track.name}
             </h1>
-            <div style={{ fontSize: 13.5, color: 'var(--nc-mut)' }}>
+            <div dir="auto" style={{ fontSize: 13.5, color: 'var(--nc-mut)' }}>
               {[context.playlistName, context.collectionName].filter(Boolean).join(' · ')}
             </div>
           </div>

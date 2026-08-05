@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useIsMobile } from '../../hooks/useMediaQuery';
 import { CreatePlaylistModal } from './CreatePlaylistModal';
 import { EditPlaylistModal } from './EditPlaylistModal';
 import { PlaylistView } from '../shared/PlaylistView';
@@ -10,6 +11,7 @@ import { Icon } from '../nocturne/icons';
 import { CollectionRecord, PlaylistRecord } from './types';
 
 export const PlaylistManagement: React.FC = () => {
+  const isMobile = useIsMobile();
   const [playlists, setPlaylists] = useState<PlaylistRecord[]>([]);
   const [collections, setCollections] = useState<CollectionRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -192,10 +194,18 @@ export const PlaylistManagement: React.FC = () => {
               className="nc-panel nc-panel-hover"
               style={{
                 display: 'grid',
-                gridTemplateColumns: '56px 1fr 200px 96px 72px',
+                // The waveform and track-count columns don't fit a phone;
+                // the count moves under the name instead.
+                gridTemplateColumns: isMobile ? '56px 1fr 76px' : '56px 1fr 200px 96px 72px',
                 alignItems: 'center',
-                gap: 16,
+                gap: isMobile ? 10 : 16,
                 padding: '12px 14px',
+              }}
+              // Double-click (or double-tap) anywhere on the row opens the
+              // playlist, matching the collection cards.
+              onDoubleClick={(e) => {
+                if ((e.target as HTMLElement).closest('button')) return;
+                setViewing(playlist);
               }}
             >
               <button
@@ -226,29 +236,43 @@ export const PlaylistManagement: React.FC = () => {
                   color: 'var(--nc-text)',
                 }}
               >
-                <div className="nc-truncate" style={{ fontSize: 14, fontWeight: 500 }}>
+                <div
+                  className="nc-clamp2"
+                  dir="auto"
+                  style={{ fontSize: 14, fontWeight: 500, lineHeight: 1.3 }}
+                >
                   {playlist.displayName || playlist.name}
                 </div>
-                <div className="nc-truncate" style={{ fontSize: 12, color: 'var(--nc-mut)' }}>
+                <div className="nc-truncate" dir="auto" style={{ fontSize: 12, color: 'var(--nc-mut)' }}>
                   {playlist.description || 'No description'}
                 </div>
+                {isMobile && (
+                  <div className="nc-mono" style={{ fontSize: 10.5, color: 'var(--nc-dim)', marginTop: 2 }}>
+                    {playlist.trackCount || 0} TRACKS
+                    {playlist.isPublic === false && ' · PRIVATE'}
+                  </div>
+                )}
               </button>
 
-              <Waveform seed={playlist.id + playlist.name} kind="playlist" height={22} />
+              {!isMobile && (
+                <Waveform seed={playlist.id + playlist.name} kind="playlist" height={22} />
+              )}
 
-              <span
-                className="nc-mono"
-                style={{ fontSize: 11.5, color: 'var(--nc-dim)', textAlign: 'right' }}
-              >
-                {playlist.trackCount || 0} TRACKS
-                {playlist.isPublic === false && (
-                  <span
-                    style={{ display: 'block', color: 'var(--nc-warn, var(--nc-mut))' }}
-                  >
-                    PRIVATE
-                  </span>
-                )}
-              </span>
+              {!isMobile && (
+                <span
+                  className="nc-mono"
+                  style={{ fontSize: 11.5, color: 'var(--nc-dim)', textAlign: 'right' }}
+                >
+                  {playlist.trackCount || 0} TRACKS
+                  {playlist.isPublic === false && (
+                    <span
+                      style={{ display: 'block', color: 'var(--nc-warn, var(--nc-mut))' }}
+                    >
+                      PRIVATE
+                    </span>
+                  )}
+                </span>
+              )}
 
               <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                 <button

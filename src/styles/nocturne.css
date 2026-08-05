@@ -714,3 +714,14 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Two lines before the ellipsis — for names on narrow screens, where a
+   single truncated line hides too much of a long track or collection name. */
+.nc-clamp2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}

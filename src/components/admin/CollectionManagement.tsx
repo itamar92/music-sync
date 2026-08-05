@@ -130,7 +130,17 @@ export const CollectionManagement: React.FC = () => {
           }}
         >
           {collections.map((item) => (
-            <div key={item.id} className="nc-panel nc-panel-hover" style={{ padding: 16 }}>
+            <div
+              key={item.id}
+              className="nc-panel nc-panel-hover"
+              style={{ padding: 16 }}
+              // Double-click (or double-tap) anywhere on the card opens the
+              // collection — the eye button stays as the discoverable route.
+              onDoubleClick={(e) => {
+                if ((e.target as HTMLElement).closest('button')) return;
+                setViewing(item);
+              }}
+            >
               <div
                 className="nc-art"
                 style={{
@@ -154,13 +164,15 @@ export const CollectionManagement: React.FC = () => {
               </div>
 
               <h3
-                className="nc-truncate"
-                style={{ margin: '0 0 4px', fontSize: 14.5, fontWeight: 500 }}
+                className="nc-clamp2"
+                dir="auto"
+                style={{ margin: '0 0 4px', fontSize: 14.5, fontWeight: 500, lineHeight: 1.3 }}
               >
                 {item.displayName || item.name}
               </h3>
               <p
                 className="nc-truncate"
+                dir="auto"
                 style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--nc-mut)' }}
               >
                 {item.description || 'No description'}

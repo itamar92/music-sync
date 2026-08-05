@@ -305,10 +305,14 @@ const MobileHome: React.FC<{ library: PublicLibrary }> = ({ library }) => {
           >
             <CollectionGlyph size={44} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="nc-truncate" style={{ fontSize: 14.5, fontWeight: 500 }}>
+              <div
+                className="nc-clamp2"
+                dir="auto"
+                style={{ fontSize: 14.5, fontWeight: 500, lineHeight: 1.3 }}
+              >
                 {label(item)}
               </div>
-              <div className="nc-truncate" style={{ fontSize: 12, color: 'var(--nc-mut)' }}>
+              <div className="nc-truncate" dir="auto" style={{ fontSize: 12, color: 'var(--nc-mut)' }}>
                 {item.description || 'Streaming from Dropbox'}
               </div>
             </div>
@@ -339,7 +343,7 @@ const MobileCollection: React.FC<{ library: PublicLibrary; collection: Collectio
       <div className="nc-kicker" style={{ fontSize: 10, marginBottom: 10 }}>
         Collection
       </div>
-      <h1 className="nc-h1" style={{ fontSize: 28, marginBottom: 10, lineHeight: 1.12 }}>
+      <h1 className="nc-h1" dir="auto" style={{ fontSize: 28, marginBottom: 10, lineHeight: 1.12 }}>
         {label(collection)}
       </h1>
       {collection.description && (
@@ -414,11 +418,16 @@ const MobileCollection: React.FC<{ library: PublicLibrary; collection: Collectio
               {String(index + 1).padStart(2, '0')}
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="nc-truncate" style={{ fontSize: 14.5, fontWeight: 500 }}>
+              <div
+                className="nc-clamp2"
+                dir="auto"
+                style={{ fontSize: 14.5, fontWeight: 500, lineHeight: 1.3 }}
+              >
                 {label(playlist)}
               </div>
               <div
                 className="nc-truncate"
+                dir="auto"
                 style={{ fontSize: 12, color: 'var(--nc-mut)', marginBottom: 6 }}
               >
                 {playlist.description || playlist.folderPath || 'Synced folder'}
@@ -535,6 +544,7 @@ const MobilePlaylist: React.FC<{
               Playlist
             </div>
             <h1
+              dir="auto"
               style={{
                 margin: '0 0 6px',
                 fontSize: 22,
@@ -542,11 +552,12 @@ const MobilePlaylist: React.FC<{
                 letterSpacing: '-0.02em',
                 lineHeight: 1.15,
                 textWrap: 'pretty',
+                overflowWrap: 'anywhere',
               }}
             >
               {label(playlist)}
             </h1>
-            <div className="nc-truncate" style={{ fontSize: 12.5, color: 'var(--nc-mut)' }}>
+            <div className="nc-truncate" dir="auto" style={{ fontSize: 12.5, color: 'var(--nc-mut)' }}>
               {playlist.description || playlist.folderPath || 'Synced from Dropbox'}
             </div>
           </div>
@@ -714,8 +725,9 @@ const MobileTrackRow: React.FC<{
           role="button"
           tabIndex={0}
           onKeyDown={(e) => e.key === 'Enter' && onPlay()}
-          className="nc-truncate"
-          style={{ fontSize: 13.5, color: 'var(--nc-text)', cursor: 'pointer' }}
+          className="nc-clamp2"
+          dir="auto"
+          style={{ fontSize: 14, lineHeight: 1.3, color: 'var(--nc-text)', cursor: 'pointer' }}
         >
           {track.name}
         </div>
@@ -763,7 +775,8 @@ const MobileSearch: React.FC<{ library: PublicLibrary }> = ({ library }) => {
           onChange={(e) => library.setSearch(e.target.value)}
           placeholder="Search collections and playlists"
           aria-label="Search"
-          style={{ fontSize: 14 }}
+          // 16px keeps iOS Safari from zooming the page when the field focuses.
+          style={{ fontSize: 16 }}
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
         />
@@ -797,7 +810,7 @@ const MobileSearch: React.FC<{ library: PublicLibrary }> = ({ library }) => {
               >
                 <CollectionGlyph size={38} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="nc-truncate" style={{ fontSize: 13.5 }}>
+                  <div className="nc-clamp2" dir="auto" style={{ fontSize: 13.5, lineHeight: 1.3 }}>
                     {label(item)}
                   </div>
                   <div
@@ -845,7 +858,7 @@ const MobileSearch: React.FC<{ library: PublicLibrary }> = ({ library }) => {
           >
             <div className="nc-art" style={{ width: 38, height: 38, borderRadius: 8 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="nc-truncate" style={{ fontSize: 13.5 }}>
+              <div className="nc-clamp2" dir="auto" style={{ fontSize: 13.5, lineHeight: 1.3 }}>
                 {label(item)}
               </div>
               <div
