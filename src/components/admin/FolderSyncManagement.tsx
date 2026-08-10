@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useEffect } from 'react';
+import { useIsMobile } from '../../hooks/useMediaQuery';
 import { AddFolderModal } from './AddFolderModal';
 import { Modal } from '../Modal';
 import { adminData, FolderFile } from '../../services/adminData';
@@ -25,6 +26,7 @@ const STATUS: Record<string, { icon: IconName; color: string; label: string }> =
 };
 
 export const FolderSyncManagement: React.FC = () => {
+  const isMobile = useIsMobile();
   const [folders, setFolders] = useState<FolderRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -138,10 +140,23 @@ export const FolderSyncManagement: React.FC = () => {
         <div className="nc-kicker" style={{ marginBottom: 10 }}>
           Watched folder
         </div>
-        <h1 className="nc-h1" style={{ fontSize: 30, marginBottom: 6 }}>
+        <h1
+          className="nc-h1"
+          dir="auto"
+          style={{ fontSize: isMobile ? 24 : 30, marginBottom: 6, overflowWrap: 'anywhere' }}
+        >
           {viewing.displayName || viewing.name}
         </h1>
-        <p className="nc-mono" style={{ margin: '0 0 24px', fontSize: 12, color: 'var(--nc-dim)' }}>
+        <p
+          className="nc-mono"
+          dir="auto"
+          style={{
+            margin: '0 0 24px',
+            fontSize: 12,
+            color: 'var(--nc-dim)',
+            overflowWrap: 'anywhere',
+          }}
+        >
           {viewing.dropboxPath}
         </p>
 
@@ -160,35 +175,43 @@ export const FolderSyncManagement: React.FC = () => {
           </div>
         ) : (
           <div className="nc-table">
-            <div
-              className="nc-table-head"
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '48px 1fr 84px',
-                gap: 16,
-                padding: '11px 18px',
-              }}
-            >
-              <span>#</span>
-              <span>FILE</span>
-              <span style={{ textAlign: 'right' }}>TIME</span>
-            </div>
+            {/* Narrower gutters and columns on a phone so the filename keeps
+                the width it needs; the header is desktop-only. */}
+            {!isMobile && (
+              <div
+                className="nc-table-head"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '48px 1fr 84px',
+                  gap: 16,
+                  padding: '11px 18px',
+                }}
+              >
+                <span>#</span>
+                <span>FILE</span>
+                <span style={{ textAlign: 'right' }}>TIME</span>
+              </div>
+            )}
             {folderFiles.map((file, index) => (
               <div
                 key={file.id}
                 className="nc-table-row nc-row-hover"
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '48px 1fr 84px',
-                  gap: 16,
-                  padding: '11px 18px',
+                  gridTemplateColumns: isMobile ? '30px 1fr 52px' : '48px 1fr 84px',
+                  gap: isMobile ? 10 : 16,
+                  padding: isMobile ? '11px 12px' : '11px 18px',
                   alignItems: 'center',
                 }}
               >
                 <span className="nc-mono" style={{ fontSize: 11.5, color: 'var(--nc-dim)' }}>
                   {String(index + 1).padStart(2, '0')}
                 </span>
-                <span className="nc-truncate" dir="auto" style={{ fontSize: 13.5 }}>
+                <span
+                  className={isMobile ? 'nc-clamp2' : 'nc-truncate'}
+                  dir="auto"
+                  style={{ fontSize: 13.5, lineHeight: isMobile ? 1.3 : undefined }}
+                >
                   {file.name}
                 </span>
                 <span
@@ -214,13 +237,14 @@ export const FolderSyncManagement: React.FC = () => {
           justifyContent: 'space-between',
           gap: 20,
           marginBottom: 24,
+          flexWrap: 'wrap',
         }}
       >
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div className="nc-kicker" style={{ marginBottom: 10 }}>
             Studio
           </div>
-          <h1 className="nc-h1" style={{ fontSize: 30, marginBottom: 6 }}>
+          <h1 className="nc-h1" style={{ fontSize: isMobile ? 24 : 30, marginBottom: 6 }}>
             Watched folders
           </h1>
           <p style={{ margin: 0, fontSize: 14, color: 'var(--nc-mut)' }}>
@@ -252,24 +276,153 @@ export const FolderSyncManagement: React.FC = () => {
         </div>
       ) : (
         <div className="nc-table">
-          <div
-            className="nc-table-head"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 120px 116px 140px',
-              gap: 16,
-              padding: '11px 18px',
-            }}
-          >
-            <span>DROPBOX PATH</span>
-            <span>FILES</span>
-            <span>STATUS</span>
-            <span style={{ textAlign: 'right' }}>ACTIONS</span>
-          </div>
+          {/*
+            Four fixed columns need ~424px before padding, so on a phone the row
+            folds into a stack instead: name and path on their own lines, then
+            files, status and the actions on one footer line. The header only
+            labels the desktop columns, so it goes with them.
+          */}
+          {!isMobile && (
+            <div
+              className="nc-table-head"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 120px 116px 140px',
+                gap: 16,
+                padding: '11px 18px',
+              }}
+            >
+              <span>DROPBOX PATH</span>
+              <span>FILES</span>
+              <span>STATUS</span>
+              <span style={{ textAlign: 'right' }}>ACTIONS</span>
+            </div>
+          )}
 
           {folders.map((folder) => {
             const status = STATUS[folder.status || 'pending'] || STATUS.pending;
             const isSyncing = syncingIds.has(folder.id) || folder.status === 'syncing';
+
+            const name = (
+              <div style={{ minWidth: 0 }}>
+                <div
+                  className={isMobile ? 'nc-clamp2' : 'nc-truncate'}
+                  dir="auto"
+                  style={{ fontSize: 13.5, fontWeight: 500, lineHeight: isMobile ? 1.3 : undefined }}
+                >
+                  {folder.displayName || folder.name}
+                </div>
+                <div
+                  className={isMobile ? 'nc-clamp2 nc-mono' : 'nc-truncate nc-mono'}
+                  dir="auto"
+                  style={{ fontSize: 11.5, color: 'var(--nc-dim)', lineHeight: isMobile ? 1.35 : undefined }}
+                >
+                  {folder.dropboxPath}
+                  {folder.includeSubfolders && ' · incl. subfolders'}
+                  {formatLastSync(folder.lastSyncAt) && ` · ${formatLastSync(folder.lastSyncAt)}`}
+                </div>
+              </div>
+            );
+
+            const files = (
+              <span className="nc-mono" style={{ fontSize: 11.5, color: 'var(--nc-muted)' }}>
+                {folder.syncedFiles || 0}/{folder.totalFiles || 0}
+              </span>
+            );
+
+            const state = (
+              <span
+                className="nc-mono"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 11,
+                  color: status.color,
+                }}
+              >
+                <Icon
+                  name={status.icon}
+                  size={13}
+                  style={isSyncing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
+                />
+                {isSyncing ? 'SYNCING' : status.label}
+              </span>
+            );
+
+            const actions = (
+              <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                <button
+                  className="nc-btn nc-btn-ghost nc-btn-icon"
+                  onClick={() => openFolder(folder)}
+                  title="View files"
+                  aria-label={`View files in ${folder.displayName || folder.name}`}
+                >
+                  <Icon name="eye" size={15} />
+                </button>
+                <button
+                  className="nc-btn nc-btn-ghost nc-btn-icon"
+                  onClick={() => markSynced(folder.id)}
+                  disabled={isSyncing}
+                  title="Sync now"
+                  aria-label={`Sync ${folder.displayName || folder.name} now`}
+                >
+                  <Icon
+                    name="refresh"
+                    size={15}
+                    style={isSyncing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
+                  />
+                </button>
+                <button
+                  className="nc-btn nc-btn-ghost nc-btn-icon"
+                  onClick={() => setEditing(folder)}
+                  title="Edit"
+                  aria-label={`Edit ${folder.displayName || folder.name}`}
+                >
+                  <Icon name="pencil" size={15} />
+                </button>
+                <button
+                  className="nc-btn nc-btn-ghost nc-btn-icon"
+                  style={{ color: 'var(--nc-danger)' }}
+                  onClick={() => removeFolder(folder)}
+                  title="Stop syncing"
+                  aria-label={`Stop syncing ${folder.displayName || folder.name}`}
+                >
+                  <Icon name="trash" size={15} />
+                </button>
+              </div>
+            );
+
+            if (isMobile) {
+              return (
+                <div
+                  key={folder.id}
+                  className="nc-table-row"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                    padding: '13px 12px',
+                  }}
+                >
+                  {name}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                      {state}
+                      {files}
+                    </div>
+                    {actions}
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
@@ -283,78 +436,10 @@ export const FolderSyncManagement: React.FC = () => {
                   alignItems: 'center',
                 }}
               >
-                <div style={{ minWidth: 0 }}>
-                  <div className="nc-truncate" style={{ fontSize: 13.5, fontWeight: 500 }}>
-                    {folder.displayName || folder.name}
-                  </div>
-                  <div
-                    className="nc-truncate nc-mono"
-                    style={{ fontSize: 11.5, color: 'var(--nc-dim)' }}
-                  >
-                    {folder.dropboxPath}
-                    {folder.includeSubfolders && ' · incl. subfolders'}
-                    {formatLastSync(folder.lastSyncAt) && ` · ${formatLastSync(folder.lastSyncAt)}`}
-                  </div>
-                </div>
-
-                <span className="nc-mono" style={{ fontSize: 11.5, color: 'var(--nc-muted)' }}>
-                  {folder.syncedFiles || 0}/{folder.totalFiles || 0}
-                </span>
-
-                <span
-                  className="nc-mono"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    fontSize: 11,
-                    color: status.color,
-                  }}
-                >
-                  <Icon
-                    name={status.icon}
-                    size={13}
-                    style={isSyncing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
-                  />
-                  {isSyncing ? 'SYNCING' : status.label}
-                </span>
-
-                <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                  <button
-                    className="nc-btn nc-btn-ghost nc-btn-icon"
-                    onClick={() => openFolder(folder)}
-                    title="View files"
-                  >
-                    <Icon name="eye" size={15} />
-                  </button>
-                  <button
-                    className="nc-btn nc-btn-ghost nc-btn-icon"
-                    onClick={() => markSynced(folder.id)}
-                    disabled={isSyncing}
-                    title="Sync now"
-                  >
-                    <Icon
-                      name="refresh"
-                      size={15}
-                      style={isSyncing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
-                    />
-                  </button>
-                  <button
-                    className="nc-btn nc-btn-ghost nc-btn-icon"
-                    onClick={() => setEditing(folder)}
-                    title="Edit"
-                  >
-                    <Icon name="pencil" size={15} />
-                  </button>
-                  <button
-                    className="nc-btn nc-btn-ghost nc-btn-icon"
-                    style={{ color: 'var(--nc-danger)' }}
-                    onClick={() => removeFolder(folder)}
-                    title="Stop syncing"
-                  >
-                    <Icon name="trash" size={15} />
-                  </button>
-                </div>
+                {name}
+                {files}
+                {state}
+                {actions}
               </div>
             );
           })}

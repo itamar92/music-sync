@@ -657,7 +657,9 @@ body {
   border: 1px solid var(--nc-line);
   box-shadow: var(--nc-shadow-lg);
   overflow: hidden;
-  max-height: calc(100vh - 32px);
+  /* dvh, not vh: on mobile Safari 100vh is taller than the visible area, which
+     put a dialog's footer buttons under the browser chrome. */
+  max-height: calc(100dvh - 32px);
   display: flex;
   flex-direction: column;
 }
