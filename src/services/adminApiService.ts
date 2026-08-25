@@ -174,7 +174,12 @@ class AdminApiService {
 
   updateTrack(
     trackId: string,
-    patch: { displayName?: string; displayArtist?: string; isExcluded?: boolean },
+    patch: {
+      displayName?: string;
+      displayArtist?: string;
+      isExcluded?: boolean;
+      durationSeconds?: number;
+    },
   ): Promise<Track> {
     return this.request(`/tracks/${trackId}`, { method: 'PATCH', body: JSON.stringify(patch) });
   }
@@ -188,6 +193,20 @@ class AdminApiService {
 
   removeTrack(playlistId: string, trackId: string): Promise<{ success: boolean }> {
     return this.request(`/playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' });
+  }
+
+  // Studio preview links. Separate from the public stream endpoints because
+  // those only serve published playlists — see studioDataService for why the
+  // studio needs its own pair.
+  getStreamUrl(filePath: string, fresh = false): Promise<{ streamUrl: string }> {
+    return this.request('/stream', {
+      method: 'POST',
+      body: JSON.stringify({ filePath, ...(fresh ? { fresh: true } : {}) }),
+    });
+  }
+
+  getStreamUrls(filePaths: string[]): Promise<{ urls: Record<string, string | null> }> {
+    return this.request('/streams', { method: 'POST', body: JSON.stringify({ filePaths }) });
   }
 
   // Watched folders

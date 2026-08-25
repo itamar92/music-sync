@@ -1,14 +1,21 @@
 import { Track } from '../types';
 import { publicDataService } from './publicDataService';
 import { shareDataService } from './shareDataService';
+import { studioDataService } from './studioDataService';
 
 /**
- * Which backend reads playback data: the public catalogue, or a share link.
+ * Which backend reads playback data: the public catalogue, a share link, or the
+ * studio.
  *
- * The track list hook and the audio engine sit above both — the same components
- * render the public site and a shared collection — so instead of threading a
- * token through them, they ask here. A share is active only while the
- * `/share/:token` view is mounted, so the public site is unaffected.
+ * The track list hook and the audio engine sit above all three — the same
+ * components render the public site, a shared collection and the studio's
+ * preview — so instead of threading a token or a session through them, they ask
+ * here. Each alternative reader is active only while its own view is mounted, so
+ * the public site is unaffected by either.
+ *
+ * The studio needs its own reader because the public endpoints serve published
+ * playlists only, and the studio exists to work on playlists before they are
+ * published. See `studioDataService`.
  */
 export interface PublicReader {
   getPlaylistTracks(playlistId: string): Promise<Track[]>;
@@ -18,5 +25,8 @@ export interface PublicReader {
   reportTrackDuration(trackId: string, durationSeconds: number): Promise<void>;
 }
 
-export const publicReader = (): PublicReader =>
-  shareDataService.isActive() ? shareDataService : publicDataService;
+export const publicReader = (): PublicReader => {
+  if (shareDataService.isActive()) return shareDataService;
+  if (studioDataService.isActive()) return studioDataService;
+  return publicDataService;
+};

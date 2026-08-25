@@ -14,7 +14,7 @@ import {
   syncPlaylistFolders,
 } from '../folderSync.js';
 import { toCollection, toFolderSync, toPlaylist, toTrack } from '../mappers.js';
-import { forget } from '../streamLinks.js';
+import { forget, getStreamUrl, getStreamUrls } from '../streamLinks.js';
 
 const router = express.Router();
 
@@ -515,6 +515,62 @@ router.put('/playlists/:id/track-order', asyncRoute(async (req, res) => {
   });
 
   res.json({ success: true });
+}));
+
+// --- streaming ---------------------------------------------------------------
+
+/**
+ * Which of `paths` exist as a track row at all.
+ *
+ * The one fence on the routes below. It deliberately ignores `is_public` and
+ * `is_excluded`: those describe what the *public site* may serve, and the studio
+ * has to be able to listen to a playlist before deciding to publish it, or to an
+ * excluded track before deciding to bring it back. Requiring a row still stops
+ * an authenticated session from minting links for arbitrary Dropbox paths.
+ */
+async function knownPaths(paths) {
+  if (paths.length === 0) return new Set();
+  const { rows } = await query(
+    'SELECT DISTINCT file_path FROM tracks WHERE file_path = ANY($1::text[])',
+    [paths],
+  );
+  return new Set(rows.map((r) => r.file_path));
+}
+
+/**
+ * Stream links for the studio's preview player.
+ *
+ * A mirror of `POST /api/public/stream` with the visibility rule dropped. The
+ * studio can't share the public endpoint: that one only serves tracks on a
+ * published playlist, so every play button on an unpublished one — which is
+ * every freshly synced folder — came back 404 with nothing to hear.
+ */
+router.post('/stream', asyncRoute(async (req, res) => {
+  const filePath = typeof req.body?.filePath === 'string' ? req.body.filePath : '';
+  if (!filePath) return res.status(400).json({ error: 'filePath is required' });
+
+  const known = await knownPaths([filePath]);
+  if (!known.has(filePath)) return res.status(404).json({ error: 'Track not found' });
+
+  // `fresh` bypasses the link cache — the player sends it after a cached link
+  // 404s, which happens when the Dropbox file was replaced since caching.
+  const streamUrl = await getStreamUrl(filePath, { fresh: req.body?.fresh === true });
+  res.json({ streamUrl });
+}));
+
+/** Batch form for the player's prefetch of upcoming tracks. */
+router.post('/streams', asyncRoute(async (req, res) => {
+  const requested = Array.isArray(req.body?.filePaths) ? req.body.filePaths : [];
+  const paths = requested.filter((p) => typeof p === 'string' && p).slice(0, 25);
+  if (paths.length === 0) return res.json({ urls: {} });
+
+  const known = await knownPaths(paths);
+  const urls = await getStreamUrls(paths.filter((p) => known.has(p)));
+  // A path with no track row resolves to null, same shape as one that failed.
+  for (const path of paths) {
+    if (!(path in urls)) urls[path] = null;
+  }
+  res.json({ urls });
 }));
 
 // --- watched folders ---------------------------------------------------------

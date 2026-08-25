@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAdminSession } from './hooks/useAdminSession';
+import { isServerMode } from './services/dataMode';
+import { studioDataService } from './services/studioDataService';
 import { ServerAdminLogin } from './admin/ServerAdminLogin';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { CollectionManagement } from './components/admin/CollectionManagement';
@@ -40,6 +42,16 @@ export const AdminDashboard: React.FC = () => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const session = useAdminSession();
+
+  // The studio previews playlists before they are published, which the public
+  // stream endpoints refuse by design. For as long as the studio is open and
+  // signed in, playback resolves through the authenticated admin endpoints
+  // instead; the cleanup covers both leaving the studio and signing out.
+  useEffect(() => {
+    if (!isServerMode || !session.isAuthenticated) return;
+    studioDataService.activate();
+    return () => studioDataService.deactivate();
+  }, [session.isAuthenticated]);
 
   const isActive = (path: string, exact = false) =>
     exact ? location.pathname === path : location.pathname.startsWith(path);
