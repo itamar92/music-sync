@@ -31,7 +31,10 @@ if (ALLOWED_ORIGINS.length > 0) {
       res.set('Access-Control-Allow-Origin', origin);
       res.set('Vary', 'Origin');
       res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-      res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+      // PUT is in here for the track-order routes. Production is same-origin
+      // through nginx and never preflights, so leaving it out went unnoticed —
+      // it only ever broke reordering against a local `npm run dev` frontend.
+      res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     }
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();

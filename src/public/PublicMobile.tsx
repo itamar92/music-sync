@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Collection, Playlist, Track } from '../types';
 import { calculatePlaylistDuration, formatTime } from '../utils/formatTime';
 import { useAudioPlayerContext } from '../context/AudioPlayerContext';
 import { usePlaylistTracks } from '../hooks/usePlaylistTracks';
+import { RowDragState, rowDragState, useDragReorder } from '../hooks/useDragReorder';
 import { Waveform } from '../components/nocturne/Waveform';
 import { WaveMark, DisplayMark, CollectionGlyph } from '../components/nocturne/WaveMark';
 import { EqBars } from '../components/nocturne/EqBars';
@@ -452,10 +453,23 @@ const MobilePlaylist: React.FC<{
   onBack: () => void;
   playlistLink: (playlist: Playlist) => string;
 }> = ({ playlist, collection, onBack, playlistLink }) => {
-  const { tracks, loading, error, reload, canSync } = usePlaylistTracks(playlist);
+  const { tracks, loading, error, reload, canReorder, reorder } = usePlaylistTracks(playlist);
   const { state, playFromPlaylist, togglePlayPause, progress, seekToFraction } =
     useAudioPlayerContext();
   const [syncing, setSyncing] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
+
+  const commitReorder = useCallback(
+    (from: number, to: number) => {
+      reorder(from, to).then(setOrderError);
+    },
+    [reorder]
+  );
+
+  const { drag, rowProps, handleProps } = useDragReorder({
+    onReorder: commitReorder,
+    enabled: canReorder,
+  });
 
   const context = useMemo(
     () => ({
@@ -581,21 +595,19 @@ const MobilePlaylist: React.FC<{
           >
             <Icon name="share" size={16} />
           </button>
-          {canSync && (
-            <button
-              className="nc-btn"
-              style={{ width: 44, height: 44, borderRadius: 999, padding: 0 }}
-              onClick={sync}
-              disabled={syncing || loading}
-              aria-label="Check Dropbox for newer versions of these files"
-            >
-              <Icon
-                name="refresh"
-                size={16}
-                style={syncing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
-              />
-            </button>
-          )}
+          <button
+            className="nc-btn"
+            style={{ width: 44, height: 44, borderRadius: 999, padding: 0 }}
+            onClick={sync}
+            disabled={syncing || loading}
+            aria-label="Check Dropbox for newer versions of these files"
+          >
+            <Icon
+              name="refresh"
+              size={16}
+              style={syncing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
+            />
+          </button>
           <span className="nc-mono" style={{ fontSize: 10.5, color: 'var(--nc-dim)' }}>
             {loading ? 'LOADING…' : `${tracks.length} · ${calculatePlaylistDuration(tracks)}`}
           </span>
@@ -603,14 +615,14 @@ const MobilePlaylist: React.FC<{
       </div>
 
       <div style={{ padding: '14px 8px 0', display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {error && (
+        {(error || orderError) && (
           <p
             className="nc-tag nc-tag-danger"
             style={{ margin: '0 10px 10px' }}
             role="status"
           >
             <Icon name="warning" size={13} />
-            {error}
+            {error || orderError}
           </p>
         )}
         {loading && (
@@ -636,6 +648,9 @@ const MobilePlaylist: React.FC<{
               if (state.currentTrack?.id !== track.id) play(index);
               else seekToFraction(fraction);
             }}
+            drag={canReorder ? rowDragState(drag, index) : null}
+            rowRef={canReorder ? rowProps(index).ref : undefined}
+            handleProps={canReorder ? handleProps(index) : undefined}
           />
         ))}
       </div>
@@ -651,8 +666,27 @@ const MobileTrackRow: React.FC<{
   progress: number;
   onPlay: () => void;
   onSeek: (fraction: number) => void;
-}> = ({ track, index, current, playing, progress, onPlay, onSeek }) => (
+  /** Null where reordering isn't offered; no grip, no drop indicator. */
+  drag?: RowDragState | null;
+  rowRef?: (node: HTMLElement | null) => void;
+  handleProps?: {
+    onPointerDown: (event: React.PointerEvent) => void;
+    style: React.CSSProperties;
+  };
+}> = ({
+  track,
+  index,
+  current,
+  playing,
+  progress,
+  onPlay,
+  onSeek,
+  drag = null,
+  rowRef,
+  handleProps,
+}) => (
   <div
+    ref={rowRef}
     className="nc-row-hover"
     style={{
       position: 'relative',
@@ -661,10 +695,32 @@ const MobileTrackRow: React.FC<{
       gap: 12,
       padding: 10,
       borderRadius: 11,
-      overflow: 'hidden',
+      // The lifted row rides above its neighbours and must not clip its shadow.
+      overflow: drag?.dragging ? 'visible' : 'hidden',
       minHeight: 56,
+      transform: drag?.dragging ? `translateY(${drag.offset}px)` : undefined,
+      zIndex: drag?.dragging ? 2 : undefined,
+      background: drag?.dragging ? 'var(--nc-elev, rgba(255,255,255,0.06))' : undefined,
+      boxShadow: drag?.dragging ? 'var(--nc-shadow-md)' : undefined,
+      transition: drag?.dragging ? 'none' : 'box-shadow 0.15s ease',
+      userSelect: drag?.dragging ? 'none' : undefined,
     }}
   >
+    {drag?.line && (
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          left: 6,
+          right: 6,
+          [drag.line === 'before' ? 'top' : 'bottom']: -1,
+          height: 2,
+          borderRadius: 2,
+          background: 'var(--nc-cy)',
+          boxShadow: '0 0 8px var(--nc-cy)',
+        }}
+      />
+    )}
     {current && (
       <>
         <div
@@ -750,6 +806,31 @@ const MobileTrackRow: React.FC<{
     >
       {track.duration || formatTime(track.durationSeconds || 0)}
     </span>
+    {handleProps && (
+      <button
+        {...handleProps}
+        aria-label={`Reorder ${track.name}`}
+        className="nc-grip"
+        style={{
+          ...handleProps.style,
+          position: 'relative',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          // A 44px target: the grip sits beside a scrubbable waveform, and a
+          // thumb that misses it would seek instead of drag.
+          width: 30,
+          height: 44,
+          flexShrink: 0,
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          color: 'var(--nc-dim)',
+        }}
+      >
+        <Icon name="grip" size={16} />
+      </button>
+    )}
   </div>
 );
 

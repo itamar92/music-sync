@@ -33,7 +33,7 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
   onPlaylistUpdated,
   isReadOnly = false,
 }) => {
-  const { tracks, loading, error, reload, setTracks, canSync } = usePlaylistTracks(playlist, {
+  const { tracks, loading, error, reload, setTracks } = usePlaylistTracks(playlist, {
     admin: !isReadOnly,
   });
   const { state, playFromPlaylist, togglePlayPause, progress, seekToFraction } =
@@ -161,16 +161,14 @@ export const PlaylistView: React.FC<PlaylistViewProps> = ({
           Back
         </button>
 
-        {canSync && (
-          <button className="nc-btn" onClick={refresh} disabled={refreshing || loading}>
-            <Icon
-              name="refresh"
-              size={14}
-              style={refreshing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
-            />
-            {refreshing ? 'Syncing…' : 'Sync from Dropbox'}
-          </button>
-        )}
+        <button className="nc-btn" onClick={refresh} disabled={refreshing || loading}>
+          <Icon
+            name="refresh"
+            size={14}
+            style={refreshing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
+          />
+          {refreshing ? 'Syncing…' : 'Sync from Dropbox'}
+        </button>
       </div>
 
       {error && (

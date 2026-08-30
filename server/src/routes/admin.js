@@ -16,6 +16,7 @@ import {
 } from '../folderSync.js';
 import { toCollection, toFolderSync, toPlaylist, toTrack } from '../mappers.js';
 import { forget, getStreamUrl, getStreamUrls } from '../streamLinks.js';
+import { parseTrackIds, setTrackOrder } from '../trackOrder.js';
 
 const router = express.Router();
 
@@ -517,18 +518,10 @@ router.delete('/playlists/:playlistId/tracks/:trackId', asyncRoute(async (req, r
 }));
 
 router.put('/playlists/:id/track-order', asyncRoute(async (req, res) => {
-  const trackIds = Array.isArray(req.body?.trackIds) ? req.body.trackIds : null;
+  const trackIds = parseTrackIds(req.body);
   if (!trackIds) return res.status(400).json({ error: 'trackIds array is required' });
 
-  await withTransaction(async (client) => {
-    for (const [index, trackId] of trackIds.entries()) {
-      await client.query(
-        'UPDATE tracks SET sort_order = $1, updated_at = now() WHERE id = $2 AND playlist_id = $3',
-        [index + 1, trackId, req.params.id],
-      );
-    }
-  });
-
+  await setTrackOrder(req.params.id, trackIds);
   res.json({ success: true });
 }));
 
