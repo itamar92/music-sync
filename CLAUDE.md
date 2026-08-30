@@ -56,6 +56,7 @@ Express + Postgres backend for container mode (Node 22, ESM):
 
 - `src/dropbox.js` — server-side Dropbox client: single-flight token refresh shared via Postgres, proactive keepalive refresh, backoff+jitter retries, 401 replay. The only Dropbox credential is `DROPBOX_REFRESH_TOKEN` (env).
 - `src/streamLinks.js` — memory→Postgres cache of Dropbox temporary links (~4h validity); audio is never proxied, the browser streams from Dropbox directly.
+- `src/audioDuration.js` / `src/durationBackfill.js` — Dropbox reports no duration, so tracks are inserted at `duration_seconds = 0`. The sweep measures them by range-reading a few blocks of each file through its temporary link (music-metadata over a Blob-alike); it runs on startup and after every sync, caps retries per track, and never overwrites a duration a listener's browser already reported.
 - `src/routes/public.js` — implements the exact REST contract `src/services/publicDataService.ts` expects (`/api/public/collections|playlists|stream|streams`). Stream endpoints only serve paths that belong to a public playlist.
 - `src/routes/admin.js` — JWT login (env-configured admin), collection/playlist CRUD, `POST /sync-folder` (Dropbox folder → playlist + tracks).
 - `src/migrations/*.sql` — applied automatically on boot.

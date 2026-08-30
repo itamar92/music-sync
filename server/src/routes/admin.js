@@ -6,6 +6,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import { query, withTransaction } from '../db.js';
 import { listAudioFiles, listFolders, normalizePath } from '../dropbox.js';
+import { backfillDurations, durationBackfillStatus } from '../durationBackfill.js';
 import {
   fillFromFolders,
   insertPickedTracks,
@@ -118,7 +119,21 @@ router.get('/stats', asyncRoute(async (_req, res) => {
     folders: Number(row.folders),
     tracks: Number(row.tracks),
     publicPlaylists: Number(row.public_playlists),
+    durations: await durationBackfillStatus(),
   });
+}));
+
+/**
+ * Re-run the duration sweep by hand.
+ *
+ * `retryUnreadable` reopens the tracks the automatic sweep gave up on, which is
+ * what to press after fixing a bad upload — otherwise those rows stay parked so
+ * a permanently unreadable file can't cost a Dropbox round-trip on every sync.
+ * Answers as soon as the sweep is under way; poll /stats for progress.
+ */
+router.post('/durations/backfill', asyncRoute(async (req, res) => {
+  backfillDurations({ retryUnreadable: Boolean(req.body?.retryUnreadable) });
+  res.json({ success: true, ...(await durationBackfillStatus()) });
 }));
 
 // --- collections -------------------------------------------------------------

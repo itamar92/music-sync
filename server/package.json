@@ -15,6 +15,7 @@
     "bcryptjs": "^2.4.3",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
+    "music-metadata": "^11.15.0",
     "pg": "^8.13.1"
   }
 }

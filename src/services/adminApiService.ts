@@ -248,6 +248,12 @@ class AdminApiService {
     folders: number;
     tracks: number;
     publicPlaylists: number;
+    /**
+     * Progress of the server-side duration sweep. `pending` counts tracks still
+     * waiting to be measured, `unreadable` the ones it has given up on — those
+     * only move again via POST /admin/durations/backfill { retryUnreadable }.
+     */
+    durations: { pending: number; unreadable: number; running: boolean };
   }> {
     return this.request('/stats');
   }
