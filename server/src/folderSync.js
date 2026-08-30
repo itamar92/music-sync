@@ -5,6 +5,7 @@
 // request validation and auth stay in the route modules.
 import { query, withTransaction } from './db.js';
 import { listAudioFiles } from './dropbox.js';
+import { scheduleDurationBackfill } from './durationBackfill.js';
 import { forget } from './streamLinks.js';
 
 /**
@@ -49,6 +50,8 @@ export async function insertPickedTracks(playlistId, files) {
       );
     }
   });
+
+  scheduleDurationBackfill('picked tracks');
 }
 
 /**
@@ -98,7 +101,16 @@ export async function materialiseFolderTracks(folderId, playlistId, files = null
     // these files gets an accurate timestamp without its name or order moving.
     const changed = await client.query(
       `UPDATE tracks AS t
-       SET dropbox_modified = f.modified
+       SET dropbox_modified = f.modified,
+           -- A new revision can be a different recording, so a duration
+           -- measured from the old one is no longer trustworthy; zeroing it
+           -- puts the row back in front of the sweep. Rows whose timestamp is
+           -- still NULL are being given their first one rather than a new one,
+           -- so their duration is left alone.
+           duration_seconds = CASE WHEN t.dropbox_modified IS NULL
+                                   THEN t.duration_seconds ELSE 0 END,
+           duration_probe_attempts = CASE WHEN t.dropbox_modified IS NULL
+                                          THEN t.duration_probe_attempts ELSE 0 END
        FROM (SELECT unnest($2::text[]) AS path, unnest($3::timestamptz[]) AS modified) AS f
        WHERE t.playlist_id = $1
          AND t.file_path = f.path
@@ -142,6 +154,7 @@ export async function fillFromFolders(folderIds, playlistId) {
       failures.push(folderId);
     }
   }
+  scheduleDurationBackfill(`playlist ${playlistId}`);
   if (failures.length === 0) return null;
   return `Saved, but ${failures.length} folder(s) could not be read from Dropbox just now. Use Sync to retry.`;
 }
@@ -176,6 +189,7 @@ export async function syncFolderById(folderId) {
       [folderId, files.length],
     );
 
+    scheduleDurationBackfill(`folder ${folder.dropbox_path}`);
     return { trackCount: files.length, playlistCount: linked.rowCount };
   } catch (err) {
     await query(

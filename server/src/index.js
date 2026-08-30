@@ -3,6 +3,7 @@
 import express from 'express';
 import { migrate, pool, query, waitForDatabase } from './db.js';
 import { isConfigured, startKeepalive, tokenStatus } from './dropbox.js';
+import { scheduleDurationBackfill } from './durationBackfill.js';
 import adminRoutes from './routes/admin.js';
 import publicRoutes from './routes/public.js';
 import shareRoutes from './routes/share.js';
@@ -99,6 +100,12 @@ async function start() {
 
   const prune = setInterval(() => { pruneExpired(); }, PRUNE_INTERVAL_MS);
   prune.unref?.();
+
+  // Catches every track that has been sitting at 0:00 — the whole library on
+  // the first boot after migration 007, then only whatever the last sync added
+  // and the process died before measuring. Deliberately not awaited: the site
+  // serves fine while durations are still filling in.
+  scheduleDurationBackfill('startup');
 
   const server = app.listen(PORT, () => console.log(`[startup] listening on :${PORT}`));
 
