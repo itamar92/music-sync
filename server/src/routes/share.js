@@ -9,10 +9,17 @@
 //
 // Nothing is cached across requests: every call re-resolves the token, so a
 // revoked link stops working immediately.
+//
+// Mostly reads, with two writes the link deliberately grants: triggering a
+// Dropbox re-sync, and reordering a playlist. Both are fenced to the shared
+// collection and documented at their routes. Everything else — renaming,
+// excluding, publishing — stays with the owner.
 import express from 'express';
 import { query } from '../db.js';
+import { syncPlaylistFolders } from '../folderSync.js';
 import { toCollection, toPlaylist, toTrack } from '../mappers.js';
 import { getStreamUrl, getStreamUrls } from '../streamLinks.js';
+import { parseTrackIds, setTrackOrder } from '../trackOrder.js';
 
 const router = express.Router();
 
@@ -108,17 +115,49 @@ router.get('/:token', asyncRoute(async (req, res) => {
   });
 }));
 
-router.get('/:token/playlists/:playlistId/tracks', asyncRoute(async (req, res) => {
-  const collection = await resolveShare(req.params.token);
-  if (!collection) return res.status(404).json(NOT_FOUND);
+/**
+ * Whether `playlistId` is inside the collection `token` grants.
+ *
+ * The single fence for every per-playlist route below. A playlist outside the
+ * shared collection is not addressable through this token, so it answers false
+ * and the caller 404s it the same way a missing one is 404'd — a token-holder
+ * can't learn that some other collection's playlist exists by probing ids.
+ *
+ * A malformed id is rejected here rather than passed to Postgres, where it
+ * would blow up as a uuid cast error and surface as a 500.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-  // A playlist outside the shared collection is not addressable through this
-  // token, so it 404s the same way a missing one does.
-  const owned = await query(
+async function isSharedPlaylist(collectionId, playlistId) {
+  if (typeof playlistId !== 'string' || !UUID.test(playlistId)) return false;
+  const { rowCount } = await query(
     'SELECT 1 FROM playlists WHERE id = $1 AND collection_id = $2',
-    [req.params.playlistId, collection.id],
+    [playlistId, collectionId],
   );
-  if (owned.rowCount === 0) return res.status(404).json({ error: 'Playlist not found' });
+  return rowCount > 0;
+}
+
+/**
+ * Resolve token + playlist for one request, answering 404 if either fails.
+ *
+ * Returns the collection on success and null once it has already responded, so
+ * a route reads `if (!collection) return;`.
+ */
+async function requireSharedPlaylist(req, res) {
+  const collection = await resolveShare(req.params.token);
+  if (!collection) {
+    res.status(404).json(NOT_FOUND);
+    return null;
+  }
+  if (!(await isSharedPlaylist(collection.id, req.params.playlistId))) {
+    res.status(404).json({ error: 'Playlist not found' });
+    return null;
+  }
+  return collection;
+}
+
+router.get('/:token/playlists/:playlistId/tracks', asyncRoute(async (req, res) => {
+  if (!(await requireSharedPlaylist(req, res))) return;
 
   const { rows } = await query(
     `SELECT * FROM tracks
@@ -127,6 +166,57 @@ router.get('/:token/playlists/:playlistId/tracks', asyncRoute(async (req, res) =
     [req.params.playlistId],
   );
   res.json(rows.map(toTrack));
+}));
+
+/**
+ * Re-pull a shared playlist's Dropbox folders on demand.
+ *
+ * The point of the share tier is handing someone a link and letting them hear
+ * the current mix; making them wait for the owner to press sync defeats it. The
+ * same three fences the public route relies on apply here, with the token
+ * standing in for public visibility:
+ *
+ *  1. the playlist must be inside the collection this token grants;
+ *  2. only folders actually linked to that playlist are touched, resolved
+ *     server-side so the caller can't name its own;
+ *  3. a per-folder cooldown (see SYNC_COOLDOWN_MS) collapses repeat presses
+ *     into a 200 that did no Dropbox work at all — on top of this router's
+ *     per-IP rate limit.
+ *
+ * Answers 200 in every non-error case; `synced` says whether anything was
+ * actually re-read, so the UI can tell "up to date" from "just refreshed".
+ */
+router.post('/:token/playlists/:playlistId/sync', asyncRoute(async (req, res) => {
+  if (!(await requireSharedPlaylist(req, res))) return;
+
+  const result = await syncPlaylistFolders(req.params.playlistId);
+  res.json({ success: true, ...result });
+}));
+
+/**
+ * Reorder a shared playlist's tracks, for everyone.
+ *
+ * A deliberate exception to this tier being otherwise read-only: whoever holds
+ * the link is trusted enough to arrange the running order, and the order is the
+ * shared artifact — a per-recipient one would mean two people on a call
+ * looking at different track 3.
+ *
+ * Last write wins. Two recipients dragging at once is resolved by whoever saves
+ * second, with no merge and no locking; anything better needs presence, which
+ * this tier doesn't have.
+ *
+ * The write itself only ever touches `sort_order` on rows already in this
+ * playlist (see setTrackOrder), so the worst a token-holder can do is rearrange
+ * tracks the link already shows them.
+ */
+router.put('/:token/playlists/:playlistId/track-order', asyncRoute(async (req, res) => {
+  if (!(await requireSharedPlaylist(req, res))) return;
+
+  const trackIds = parseTrackIds(req.body);
+  if (!trackIds) return res.status(400).json({ error: 'trackIds array is required' });
+
+  await setTrackOrder(req.params.playlistId, trackIds);
+  res.json({ success: true });
 }));
 
 /** Which of `paths` belong to a playlist inside the shared collection. */

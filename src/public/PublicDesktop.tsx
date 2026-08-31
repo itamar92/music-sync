@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Collection, Playlist, Track } from '../types';
 import { calculatePlaylistDuration, formatTime } from '../utils/formatTime';
 import { useAudioPlayerContext } from '../context/AudioPlayerContext';
 import { usePlaylistTracks } from '../hooks/usePlaylistTracks';
+import { RowDragState, rowDragState, useDragReorder } from '../hooks/useDragReorder';
 import { Waveform } from '../components/nocturne/Waveform';
 import { WaveMark, DisplayMark, CollectionGlyph } from '../components/nocturne/WaveMark';
 import { EqBars } from '../components/nocturne/EqBars';
@@ -558,10 +559,27 @@ const PlaylistPane: React.FC<{
   onBack: () => void;
   playlistLink: (playlist: Playlist) => string;
 }> = ({ playlist, collection, onBack, playlistLink }) => {
-  const { tracks, loading, error, reload, canSync } = usePlaylistTracks(playlist);
+  const { tracks, loading, error, reload, canReorder, reorder } = usePlaylistTracks(playlist);
   const { state, playFromPlaylist, togglePlayPause, progress, seekToFraction, setContext } =
     useAudioPlayerContext();
   const [syncing, setSyncing] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
+
+  const commitReorder = useCallback(
+    (from: number, to: number) => {
+      reorder(from, to).then(setOrderError);
+    },
+    [reorder]
+  );
+
+  const { drag, rowProps, handleProps } = useDragReorder({
+    onReorder: commitReorder,
+    enabled: canReorder,
+  });
+
+  // The grip column exists only where reordering is allowed, so a read-only
+  // view keeps exactly the layout it had.
+  const columns = canReorder ? '22px 44px 1fr 1.35fr 74px' : '44px 1fr 1.35fr 74px';
 
   const context = useMemo(
     () => ({
@@ -665,22 +683,20 @@ const PlaylistPane: React.FC<{
               <Icon name="share" size={15} />
               Share link
             </button>
-            {canSync && (
-              <button
-                className="nc-btn"
-                style={{ height: 38, borderRadius: 999 }}
-                onClick={sync}
-                disabled={syncing || loading}
-                title="Check Dropbox for newer versions of these files"
-              >
-                <Icon
-                  name="refresh"
-                  size={15}
-                  style={syncing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
-                />
-                {syncing ? 'Syncing…' : 'Sync'}
-              </button>
-            )}
+            <button
+              className="nc-btn"
+              style={{ height: 38, borderRadius: 999 }}
+              onClick={sync}
+              disabled={syncing || loading}
+              title="Check Dropbox for newer versions of these files"
+            >
+              <Icon
+                name="refresh"
+                size={15}
+                style={syncing ? { animation: 'ms-spin 0.8s linear infinite' } : undefined}
+              />
+              {syncing ? 'Syncing…' : 'Sync'}
+            </button>
             <span className="nc-mono" style={{ fontSize: 11.5, color: 'var(--nc-dim)' }}>
               {loading ? 'LOADING…' : `${tracks.length} TRACKS · ${totalDuration}`}
             </span>
@@ -689,10 +705,10 @@ const PlaylistPane: React.FC<{
       </div>
 
       <div style={{ padding: '0 40px 46px' }}>
-        {error && (
+        {(error || orderError) && (
           <p className="nc-tag nc-tag-danger" style={{ marginBottom: 16 }} role="status">
             <Icon name="warning" size={13} />
-            {error}
+            {error || orderError}
           </p>
         )}
 
@@ -700,7 +716,7 @@ const PlaylistPane: React.FC<{
           className="nc-mono"
           style={{
             display: 'grid',
-            gridTemplateColumns: '44px 1fr 1.35fr 74px',
+            gridTemplateColumns: columns,
             alignItems: 'center',
             gap: 18,
             padding: '0 14px 9px',
@@ -710,6 +726,7 @@ const PlaylistPane: React.FC<{
             borderBottom: '1px solid var(--nc-line)',
           }}
         >
+          {canReorder && <span aria-hidden="true" />}
           <span>#</span>
           <span>TITLE</span>
           <span>WAVEFORM · CLICK TO SCRUB</span>
@@ -733,6 +750,7 @@ const PlaylistPane: React.FC<{
             key={track.id || index}
             track={track}
             index={index}
+            columns={columns}
             current={state.currentTrack?.id === track.id}
             playing={state.currentTrack?.id === track.id && state.isPlaying}
             progress={state.currentTrack?.id === track.id ? progress : 0}
@@ -743,6 +761,9 @@ const PlaylistPane: React.FC<{
               if (state.currentTrack?.id !== track.id) play(index);
               else seekToFraction(fraction);
             }}
+            drag={canReorder ? rowDragState(drag, index) : null}
+            rowRef={canReorder ? rowProps(index).ref : undefined}
+            handleProps={canReorder ? handleProps(index) : undefined}
           />
         ))}
       </div>
@@ -753,35 +774,99 @@ const PlaylistPane: React.FC<{
 interface TrackRowProps {
   track: Track;
   index: number;
+  /** Shared with the header so the grip column lines up. */
+  columns: string;
   current: boolean;
   playing: boolean;
   progress: number;
   onPlay: () => void;
   onSeek: (fraction: number) => void;
+  /** Null where reordering isn't offered; no grip, no drop indicator. */
+  drag?: RowDragState | null;
+  rowRef?: (node: HTMLElement | null) => void;
+  handleProps?: {
+    onPointerDown: (event: React.PointerEvent) => void;
+    style: React.CSSProperties;
+  };
 }
 
 const TrackRow: React.FC<TrackRowProps> = ({
   track,
   index,
+  columns,
   current,
   playing,
   progress,
   onPlay,
   onSeek,
+  drag = null,
+  rowRef,
+  handleProps,
 }) => (
   <div
+    ref={rowRef}
     className="nc-row-hover"
     style={{
       position: 'relative',
       display: 'grid',
-      gridTemplateColumns: '44px 1fr 1.35fr 74px',
+      gridTemplateColumns: columns,
       alignItems: 'center',
       gap: 18,
       padding: '11px 14px',
       borderRadius: 9,
-      overflow: 'hidden',
+      // The lifted row rides above its neighbours and must not clip its own
+      // shadow; every other row keeps clipping the now-playing wash.
+      overflow: drag?.dragging ? 'visible' : 'hidden',
+      transform: drag?.dragging ? `translateY(${drag.offset}px)` : undefined,
+      zIndex: drag?.dragging ? 2 : undefined,
+      background: drag?.dragging ? 'var(--nc-elev, rgba(255,255,255,0.06))' : undefined,
+      boxShadow: drag?.dragging ? 'var(--nc-shadow-md)' : undefined,
+      // Following the pointer has to be instant; settling back can ease.
+      transition: drag?.dragging ? 'none' : 'box-shadow 0.15s ease',
+      // A drag in progress must not leave text selected in its wake.
+      userSelect: drag?.dragging ? 'none' : undefined,
     }}
   >
+    {drag?.line && (
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          left: 8,
+          right: 8,
+          [drag.line === 'before' ? 'top' : 'bottom']: -1,
+          height: 2,
+          borderRadius: 2,
+          background: 'var(--nc-cy)',
+          boxShadow: '0 0 8px var(--nc-cy)',
+        }}
+      />
+    )}
+
+    {handleProps && (
+      <button
+        {...handleProps}
+        aria-label={`Reorder ${track.name}`}
+        title="Drag to reorder"
+        className="nc-grip"
+        style={{
+          ...handleProps.style,
+          position: 'relative',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 22,
+          height: 30,
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          color: 'var(--nc-dim)',
+        }}
+      >
+        <Icon name="grip" size={15} />
+      </button>
+    )}
+
     {current && (
       <>
         <div

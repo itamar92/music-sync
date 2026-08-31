@@ -29,10 +29,10 @@ interface PlaylistLike {
 }
 
 /**
- * Trigger a Dropbox re-pull for one playlist, admin route or public one.
+ * Trigger a Dropbox re-pull for one playlist: admin, share or public route.
  *
- * A share link reads through a token-scoped API that has no sync endpoint, so
- * there the request is simply skipped — the button is hidden in that context.
+ * A share link syncs through its own token-scoped endpoint — someone handed a
+ * new mix shouldn't have to wait for the owner to press sync to hear it.
  *
  * Returns a message to show when the sync itself failed, rather than throwing:
  * the reload has to happen either way, because a stale-but-present list beats
@@ -42,9 +42,10 @@ const syncPlaylistFolders = async (
   playlistId: string,
   asAdmin: boolean
 ): Promise<string | null> => {
-  if (shareDataService.isActive()) return null;
   try {
-    await (asAdmin ? adminApi.syncPlaylist(playlistId) : publicDataService.syncPlaylist(playlistId));
+    if (asAdmin) await adminApi.syncPlaylist(playlistId);
+    else if (shareDataService.isActive()) await shareDataService.syncPlaylist(playlistId);
+    else await publicDataService.syncPlaylist(playlistId);
     return null;
   } catch (error) {
     console.error('Playlist sync failed:', error);
@@ -78,11 +79,21 @@ interface UsePlaylistTracksResult {
   reload: (refreshCache?: boolean) => Promise<void>;
   setTracks: React.Dispatch<React.SetStateAction<Track[]>>;
   /**
-   * Whether `reload(true)` can actually reach Dropbox, so a view knows whether
-   * to offer a sync control. False inside a share link, whose token-scoped API
-   * has no sync endpoint.
+   * Whether this view may rearrange the playlist, so it knows whether to render
+   * drag handles. True only inside a share link: the link is a deliberate grant
+   * of trust, where the public catalogue is open to anyone who finds the URL.
    */
-  canSync: boolean;
+  canReorder: boolean;
+  /**
+   * Move one track and persist the new running order for everyone.
+   *
+   * Optimistic — the list settles immediately and reverts if the write fails,
+   * because a row that snaps back after a beat reads as a bug, while a row that
+   * never moves reads as a dead control.
+   *
+   * Resolves to an error message on failure, or null on success.
+   */
+  reorder: (from: number, to: number) => Promise<string | null>;
 }
 
 interface UsePlaylistTracksOptions {
@@ -232,9 +243,39 @@ export const usePlaylistTracks = (
     return () => window.removeEventListener('trackDurationsUpdated', handleDurations);
   }, []);
 
-  // Firebase mode has always been able to re-list Dropbox from a playlist view;
-  // container mode now can too, except inside a share link.
-  const canSync = isServerMode ? !shareDataService.isActive() : true;
+  // There is no `canSync` counterpart to this any more: every context can now
+  // re-list Dropbox from a playlist view, so the flag that used to gate the
+  // button was always true once the share link stopped being the exception.
+  //
+  // Reordering stays share-only. The public site is reachable by anyone who
+  // finds the URL, and a running order any passer-by can rearrange isn't one
+  // the owner can rely on; a share token is at least handed out on purpose.
+  const canReorder = isServerMode && shareDataService.isActive();
 
-  return { tracks, loading, error, reload: load, setTracks, canSync };
+  const reorder = useCallback(
+    async (from: number, to: number): Promise<string | null> => {
+      if (!canReorder || from === to || !playlistId) return null;
+
+      if (from < 0 || to < 0 || from >= tracks.length || to >= tracks.length) return null;
+
+      // Held so a failed write can put back exactly what was on screen.
+      const previous = tracks;
+      const moved = [...tracks];
+      const [track] = moved.splice(from, 1);
+      moved.splice(to, 0, track);
+      setTracks(moved);
+
+      try {
+        await shareDataService.setTrackOrder(playlistId, moved);
+        return null;
+      } catch (err) {
+        console.error('Failed to save track order:', err);
+        setTracks(previous);
+        return 'Could not save the new order. Please try again.';
+      }
+    },
+    [canReorder, playlistId, tracks]
+  );
+
+  return { tracks, loading, error, reload: load, setTracks, canReorder, reorder };
 };
